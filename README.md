@@ -59,6 +59,29 @@ drives the bus.
 
 Left to right: Raspberry Pi 5 header, ESP32-P4-Nano, Waveshare ESP32-C6-LCD-1.47.
 
+## Network
+
+The Pi has two links: Ethernet to the bench PC for control, and Wi-Fi for
+internet.
+
+| Link | Pi address | Other end | Used for |
+|---|---|---|---|
+| **Ethernet** (`eth0`), direct cable | **192.168.10.2/24**, static | Bench PC Ethernet port at **192.168.10.1/24**, static, no gateway | SSH, web page, REST API, deploys |
+| **Wi-Fi** (`wlan0`) | **192.168.1.224/24** from DHCP (can change) | `wcs-sw-wifi`, 5 GHz, gateway 192.168.1.1 | Internet: apt updates, NTP time sync |
+
+- The default route goes over Wi-Fi, so the Pi reaches the internet even with
+  the Ethernet cable going only to the PC.
+- The tester's web page and API answer on both addresses: `http://192.168.10.2/`
+  from the bench PC, `http://192.168.1.224/` from a PC on `wcs-sw-wifi`.
+- Login: `ssh m4013pi@192.168.10.2` (user `m4013pi`, SSH key, passwordless
+  sudo). Hostname `m4013pi`, also `m4013pi.local` where mDNS works.
+- If the Ethernet IP is lost (for example after a wrong IP in Settings), the Pi
+  still answers on its IPv6 link-local address `fe80::9afe:54ff:fe64:fb0b%<PC interface index>`.
+- The Ethernet IP and Wi-Fi network come from Settings on the web page
+  (`/api/settings`) and are written to `/etc/netplan/60-pi-tester.yaml`; they
+  take effect after a reboot.
+- To check the links on the Pi: `ip -br addr`, `iw dev wlan0 link`, `ping -c 2 8.8.8.8`.
+
 ## Pin map: P4-Nano → Raspberry Pi 5
 
 GPIO numbers are BCM numbers. "Header" is the physical pin on the 40-pin header.
