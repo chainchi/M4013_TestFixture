@@ -393,7 +393,55 @@ curl %J% -d "{\"bus\":1,\"addr\":64,\"write\":\"03\"}" %H%/api/i2c/xfer
 - Don't add a byte after the data on a write: the simulator treats it as a PEC
   byte and rejects the write (`20`).
 
-### 6. UART consoles
+### 6. EEPROM 24C02 on bus 0 (address 0x50 = 80)
+
+The 24C02 holds 256 bytes (memory addresses 0x00–0xFF, 1 address byte) and
+writes in 8-byte pages.
+
+| 24C02 pin | Connect to |
+|---|---|
+| VCC (8) | Pi 3.3 V, header pin 1 |
+| GND (4) | Pi GND, header pin 9 |
+| SDA (5) | Pi GPIO2, header pin 3 |
+| SCL (6) | Pi GPIO3, header pin 5 |
+| A0, A1, A2 (1–3) | GND, giving address 0x50 |
+| WP (7) | GND, or writes are ignored |
+
+Bus 0 already has 1.8 kΩ pull-ups on the Pi; don't add more.
+
+**Web page** (I2C panel; the Address box takes hex):
+
+| Step | Bus | Address | Write | Read | Click | Expect in the log |
+|---|---|---|---|---|---|---|
+| Find it | Bus 0 | – | – | – | Scan | `bus 0 (100 kHz) scan: 0x50` |
+| Write `AA BB CC` at 0x10 | Bus 0 | `0x50` | `10 AA BB CC` | `0` | Execute | `bus 0 0x50 W[10 AA BB CC] R0: ok` |
+| Read 3 bytes from 0x10 | Bus 0 | `0x50` | `10` | `3` | Execute | `bus 0 0x50 W[10] R3: AA BB CC` |
+| Dump the first 16 bytes | Bus 0 | `0x50` | `00` | `16` | Execute | 16 hex bytes |
+
+**curl:**
+
+```bat
+curl %J% -d "{\"bus\":0}" %H%/api/i2c/scan
+:: write AA BB CC at memory address 0x10
+curl %J% -d "{\"bus\":0,\"addr\":80,\"write\":\"10 AA BB CC\"}" %H%/api/i2c/xfer
+:: read 3 bytes from 0x10 (expect "data":"AA BB CC")
+curl %J% -d "{\"bus\":0,\"addr\":80,\"write\":\"10\",\"read\":3}" %H%/api/i2c/xfer
+:: dump the whole EEPROM (256 bytes)
+curl %J% -d "{\"bus\":0,\"addr\":80,\"write\":\"00\",\"read\":256}" %H%/api/i2c/xfer
+```
+
+- **Write** is the memory address followed by the data. **Read** with a memory
+  address in Write reads from there (repeated start).
+- **Page size 8:** one write must stay inside one 8-byte page (0x00–0x07,
+  0x08–0x0F, ...). Bytes past the page end wrap to the start of the same page,
+  so `0E 11 22 33` writes 0x0E, 0x0F and then 0x08. Split longer data into one
+  write per page.
+- **Write time:** the chip is busy for about 5 ms after each write and NACKs
+  meanwhile. If the next command gives `NACK / no device`, run it again.
+- **WP high:** writes are ignored. Many chips still ACK, so the write replies
+  `ok` but the read-back shows the old bytes.
+
+### 7. UART consoles
 
 Plug the CP2108 (or any USB-serial adapter) into the Pi and wire **TX0 → RX0** on
 the adapter.
@@ -411,7 +459,7 @@ and the adapter's VID:PID in `usb_dev` (CP2108 = `10C4:EA71`). Type in the UART 
 console on the web page: with the loopback, the text comes back on the console,
 on the `stream` call (stop it with Ctrl+C) and in `uart0.txt`.
 
-### 7. Redfish
+### 8. Redfish
 
 Set the DUT host and credentials in the web page's Settings first.
 
@@ -423,7 +471,7 @@ curl %J% -d "{\"method\":\"GET\",\"path\":\"/redfish/v1/Systems\",\"body\":\"\"}
 Expect `{"status":200,"body":"..."}` from a real BMC, or
 `"error":"cannot reach ..."` when no DUT is connected.
 
-### 8. Settings
+### 9. Settings
 
 ```bat
 curl %H%/api/settings
@@ -481,6 +529,7 @@ docs/API.md       HTTP API reference
 | I2C bus 1 vs PMBus PSU simulator (0x40): scan, reads, writes, MFR_SET_LOAD 0xD0, STATUS_CML 00 | ✅ with the STM32 tester off the bus |
 | PSU simulator VOUT_COMMAND 0x21 | ⬜ firmware flashed, waiting for test results |
 | PSU simulator MFR_SET_VIN 0xD1 | ⬜ firmware flashed (60f24ae), waiting for test results |
+| EEPROM 24C02 on bus 0 (0x50): write and read back | ⬜ connected, not yet tested |
 | PSU simulator side-band pins (SMBALERT#, PRESENT#, PS_ON#) | ⬜ not wired |
 | UART hub + WebSocket + scrollback (virtual serial port) | ✅ |
 | UART with a real CP2108 / FTDI adapter | ⬜ no adapter connected |
