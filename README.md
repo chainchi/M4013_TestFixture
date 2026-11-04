@@ -44,6 +44,21 @@ The ESP32-C6 simulator stands in for a real CRPS power supply on the DUT's
 PMBus, so the Pi can test I2C/PMBus before the real hardware arrives. Its
 firmware lives in `G:\SOURCE_CODE\ESP32\pmbus-psu-sim`.
 
+### Prototype
+
+![Bench prototype: Pi 5, ESP32-C6 PSU simulator on the breadboard, LEDs on GPIO/PWM, STM32 tester at the right](prototype_raspberry_5.jpg)
+
+The Pi 5 (top left) drives LEDs on the GPIO/PWM pins (yellow breadboard) and the
+ESP32-C6-LCD-1.47 PSU simulator (red breadboard, showing VIN 230 V, VOUT 12.00 V).
+The STM32 bit-bang tester (right) shares the PMBus wires; stop it while the Pi
+drives the bus.
+
+### Board pinouts (reference)
+
+![Pinouts: Raspberry Pi 5 40-pin header, ESP32-P4-Nano, ESP32-C6-LCD-1.47](pinouts_of_devices.png)
+
+Left to right: Raspberry Pi 5 header, ESP32-P4-Nano, Waveshare ESP32-C6-LCD-1.47.
+
 ## Pin map: P4-Nano → Raspberry Pi 5
 
 GPIO numbers are BCM numbers. "Header" is the physical pin on the 40-pin header.
@@ -319,6 +334,31 @@ curl %J% -d "{\"bus\":1,\"addr\":64,\"write\":\"21 00 18\"}" %H%/api/i2c/xfer
 |---|---|---|---|---|---|---|---|---|
 | Bytes | `CD 16` | `00 17` | `9A 17` | `00 18` | `66 18` | `9A 18` | `00 19` | `33 19` |
 
+**Set VIN (MFR_SET_VIN 0xD1, LINEAR11 volts, 0–300 V)**
+
+```bat
+:: 230 V, read back on D1 and READ_VIN 88: both 98 F3
+curl %J% -d "{\"bus\":1,\"addr\":64,\"write\":\"D1 98 F3\"}" %H%/api/i2c/xfer
+curl %J% -d "{\"bus\":1,\"addr\":64,\"write\":\"D1\",\"read\":2}" %H%/api/i2c/xfer
+curl %J% -d "{\"bus\":1,\"addr\":64,\"write\":\"88\",\"read\":2}" %H%/api/i2c/xfer
+:: 85 V: under the 90 V UV warning, STATUS_WORD 79 shows the input fault bits
+curl %J% -d "{\"bus\":1,\"addr\":64,\"write\":\"D1 A8 EA\"}" %H%/api/i2c/xfer
+curl %J% -d "{\"bus\":1,\"addr\":64,\"write\":\"79\",\"read\":2}" %H%/api/i2c/xfer
+:: back to 230 V, then clear the latched UV bits
+curl %J% -d "{\"bus\":1,\"addr\":64,\"write\":\"D1 98 F3\"}" %H%/api/i2c/xfer
+curl %J% -d "{\"bus\":1,\"addr\":64,\"write\":\"03\"}" %H%/api/i2c/xfer
+```
+
+| Volts | 0 | 85 | 120 | 230 | 264 |
+|---|---|---|---|---|---|
+| Bytes | `00 00` | `A8 EA` | `C0 EB` | `98 F3` | `10 FA` |
+
+- READ_IIN (0x89) follows: IIN = PIN / VIN. POUT, IOUT and PIN don't change.
+- Over 300 V, or while the `fault ac_loss` is on: CML `40`, no change.
+- If the VIN trimmer is on (`pot` on the simulator console), READ_VIN is the
+  setpoint × the knob position (scale mode) or the knob alone (abs mode). For
+  READ_VIN to equal what you write, run `pot off` on the simulator console.
+
 **Decoding the bytes**
 - Bytes come **low byte first**: `EE 0A` is the word 0x0AEE.
 - **LINEAR11** (power, current, VIN): the top 5 bits are the exponent N, the low
@@ -417,6 +457,7 @@ docs/API.md       HTTP API reference
 | I2C buses 0 and 1: scan (idle lines high, no devices), NACK reply | ✅ |
 | I2C bus 1 vs PMBus PSU simulator (0x40): scan, reads, writes, MFR_SET_LOAD 0xD0, STATUS_CML 00 | ✅ with the STM32 tester off the bus |
 | PSU simulator VOUT_COMMAND 0x21 | ⬜ firmware flashed, waiting for test results |
+| PSU simulator MFR_SET_VIN 0xD1 | ⬜ firmware flashed (60f24ae), waiting for test results |
 | PSU simulator side-band pins (SMBALERT#, PRESENT#, PS_ON#) | ⬜ not wired |
 | UART hub + WebSocket + scrollback (virtual serial port) | ✅ |
 | UART with a real CP2108 / FTDI adapter | ⬜ no adapter connected |
