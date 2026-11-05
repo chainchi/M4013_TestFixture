@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pi Test Camera</title>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--fg:#1c1f24;--mut:#6b7280;--line:#dde0e5;--acc:#2563eb;--ok:#15803d;--bad:#b91c1c}
+@media (prefers-color-scheme:dark){:root{--bg:#14161a;--card:#1d2026;--fg:#e6e8eb;--mut:#9aa1ab;--line:#2c3038;--acc:#5b8cff;--ok:#4ade80;--bad:#f87171}}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;display:flex;flex-direction:column;background:var(--bg);color:var(--fg);font:14px/1.4 system-ui,Segoe UI,Arial,sans-serif}
+header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 16px;background:var(--card);border-bottom:1px solid var(--line)}
+header h1{font-size:16px;margin:0}
+.pill{padding:2px 8px;border-radius:10px;font-size:12px;border:1px solid var(--line)}
+.on{color:var(--ok)}.off{color:var(--bad)}
+.mut{color:var(--mut)}
+select,button,a.btn{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:4px 10px;text-decoration:none;cursor:pointer}
+button,a.btn.pri{background:var(--acc);color:#fff;border-color:var(--acc)}
+button.sec,a.btn{background:transparent;color:var(--fg)}
+main{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:12px 16px;background:#000}
+main img{width:100%;height:100%;object-fit:contain}
+#msg{color:#ccc;position:absolute}
+</style>
+</head>
+<body>
+<header>
+  <a class="btn" href="/">&larr; Test host</a>
+  <h1>Camera</h1>
+  <span class="pill"><b id="st" class="off">-</b></span>
+  <span id="info" class="mut" style="font-size:12px"></span>
+  <span style="flex:1"></span>
+  <label class="mut" for="fps">Rate</label>
+  <select id="fps" onchange="play()">
+    <option value="2">2 fps</option><option value="5">5 fps</option>
+    <option value="15" selected>15 fps</option><option value="30">30 fps</option>
+  </select>
+  <button class="sec" id="pause" onclick="togglePause()">Pause</button>
+  <a class="btn pri" href="/api/camera/snapshot" target="_blank" title="current frame as a JPEG">Snapshot</a>
+  <button class="sec" onclick="document.querySelector('main').requestFullscreen()">Full screen</button>
+</header>
+<main><span id="msg"></span><img id="v" alt=""></main>
+<script>
+const $=id=>document.getElementById(id);
+let paused=false;
+try{const f=localStorage.getItem('camFps'); if(f) $('fps').value=f;}catch(e){}
+function play(){
+  try{localStorage.setItem('camFps',$('fps').value);}catch(e){}
+  paused=false; $('pause').textContent='Pause';
+  $('v').src=`/api/camera/stream?fps=${$('fps').value}&t=${Date.now()}`;
+}
+/* Pause keeps the last frame on screen and closes the stream */
+function togglePause(){
+  if(paused) return play();
+  const v=$('v'), c=document.createElement('canvas');
+  c.width=v.naturalWidth; c.height=v.naturalHeight;
+  try{c.getContext('2d').drawImage(v,0,0); v.src=c.toDataURL('image/jpeg');}catch(e){v.removeAttribute('src');}
+  paused=true; $('pause').textContent='Resume';
+}
+$('v').onerror=()=>{ if(!paused) setTimeout(play,2000); };   /* stream dropped: reconnect */
+async function status(){
+  try{
+    const s=await (await fetch('/api/camera')).json();
+    $('st').textContent=s.present?(s.running?'live':'ready'):'no camera';
+    $('st').className=s.present?'on':'off';
+    $('info').textContent=s.present?`${s.name}${s.running?` · ${s.width}×${s.height} @ ${s.fps} fps · ${s.viewers} viewer(s)`:''}`:(s.error||'plug a USB webcam into the Pi');
+    $('msg').textContent=s.present?'':'No camera connected';
+  }catch(e){ $('st').textContent='offline'; $('st').className='off'; }
+}
+play(); status(); setInterval(status,3000);
+</script>
+</body>
+</html>

@@ -82,6 +82,26 @@ internet.
   take effect after a reboot.
 - To check the links on the Pi: `ip -br addr`, `iw dev wlan0 link`, `ping -c 2 8.8.8.8`.
 
+### Remote access: https://pi-tester.dona-anna.com
+
+The web page is also published through a **Cloudflare Tunnel** with a
+**Cloudflare Access** login in front, so it can be opened from anywhere.
+
+| Part | Setting |
+|---|---|
+| Tunnel | `m4013pi` (Networking → Tunnels), `cloudflared` service on the Pi, starts at boot, outbound only (no open ports) |
+| Route | `pi-tester.dona-anna.com` → `http://localhost:80` (DNS CNAME created by Cloudflare) |
+| Login | Access application `pi-tester`, policy `M4013 owner only`: Allow, Emails = the account owner. One-time PIN sent by email |
+| Zero Trust team | `holy-thunder-658c` (Free plan) |
+
+- Without a login, every request (page and API) gets a 302 to the Access login page.
+- To let someone else in, add their email to the `M4013 owner only` policy
+  (Zero Trust → Access controls → Policies).
+- curl/scripts through Cloudflare need an Access service token; on the bench
+  use `http://192.168.10.2` directly.
+- On the Pi: `systemctl status cloudflared`, `journalctl -u cloudflared -f`.
+  To take it offline: `sudo systemctl stop cloudflared` (or `disable` to keep it off after reboot).
+
 ## Pin map: P4-Nano → Raspberry Pi 5
 
 GPIO numbers are BCM numbers. "Header" is the physical pin on the 40-pin header.
@@ -201,7 +221,7 @@ tar --exclude=__pycache__ -cf - pi_tester deploy | ssh m4013pi@192.168.10.2 \
 ```
 
 The installer:
-- installs the packages (`python3-aiohttp`, `python3-libgpiod`, `python3-smbus2`, `python3-serial`, `i2c-tools`, `avahi-daemon`, `iw`)
+- installs the packages (`python3-aiohttp`, `python3-libgpiod`, `python3-smbus2`, `python3-serial`, `python3-pil`, `python3-numpy`, `i2c-tools`, `avahi-daemon`, `iw`)
 - adds the I2C bus 1 and PWM overlays to `/boot/firmware/config.txt` (first time only, then reboot)
 - copies the code to `/opt/pi-tester` and starts the `pi-tester` service at boot
 - on the first install, takes the Ethernet IP and Wi-Fi from the current netplan
@@ -483,6 +503,24 @@ Expect the settings as JSON (passwords are not shown, only `dut_pass_set` /
 their value. Changing the IP or Wi-Fi only takes effect after a reboot
 (`curl -X POST %H%/api/reboot`); write down the new IP first.
 
+### 10. Camera (USB webcam)
+
+Plug a UVC webcam into any USB port of the Pi. The main page shows a 5 fps live
+view next to the UART console (untick **live** to turn it off); the **Camera**
+button in the header opens the full page `/camera` (rate 2–30 fps, Pause,
+Snapshot, Full screen).
+
+```bat
+curl %H%/api/camera
+curl -o pic.jpg %H%/api/camera/snapshot
+```
+
+Expect `"present":true` with the camera's name and `"format":"MJPG"` or
+`"YUYV"`, and a JPEG in `pic.jpg`. MJPEG cameras' frames go out as they are;
+YUYV-only cameras (like the Sonix 0c45:62f1, 640×480) are JPEG-encoded on the
+Pi, about 18 % of one core while someone watches. The camera only runs while a
+page or stream is open and stops 5 s after the last viewer.
+
 ## Project layout
 
 ```
@@ -494,8 +532,10 @@ pi_tester/
   uart_hub.py     USB-serial adapters, 256 KB scrollback per port
   redfish.py      HTTPS client to the DUT
   net.py          Ethernet/Wi-Fi status, netplan settings
+  camera.py       USB webcam capture (V4L2), MJPEG stream
   web_server.py   REST API, WebSocket consoles, UART streams (aiohttp)
   web/index.html  the control page (P4 page, renamed)
+  web/camera.html full-page camera view
 deploy/
   install.sh      installer
   pi-tester.service
@@ -535,3 +575,4 @@ docs/API.md       HTTP API reference
 | UART with a real CP2108 / FTDI adapter | ⬜ no adapter connected |
 | Redfish error path (no DUT) | ✅ real DUT not yet |
 | Settings read/write; netplan generation validated | ✅ not yet applied with a reboot |
+| USB camera (Sonix YUYV 640×480): live view, /camera page, snapshot | ✅ through Cloudflare not yet |

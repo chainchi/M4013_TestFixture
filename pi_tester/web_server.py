@@ -5,10 +5,11 @@ import asyncio
 import os
 import re
 import subprocess
+import time
 
 from aiohttp import WSMsgType, web
 
-from . import config, i2c_ctrl, io_ctrl, net, redfish, settings, uart_hub
+from . import camera, config, i2c_ctrl, io_ctrl, net, redfish, settings, uart_hub
 
 WS_CHUNK = 4096
 PUMP_PERIOD_S = 0.03
@@ -16,6 +17,7 @@ STREAM_POLL_S = 0.05
 MAX_STREAMS = 4
 
 _INDEX = os.path.join(os.path.dirname(__file__), "web", "index.html")
+_CAMERA = os.path.join(os.path.dirname(__file__), "web", "camera.html")
 
 _ws_clients = set()
 # Live-stream cursors, only touched from the event loop (pump and the WS handler)
@@ -70,7 +72,11 @@ def query_port(req):
 
 
 async def h_index(req):
-    return web.FileResponse(_INDEX, headers={"Content-Type": "text/html"})
+    return web.FileResponse(_INDEX, headers={"Content-Type": "text/html", "Cache-Control": "no-cache"})
+
+
+async def h_camera_page(req):
+    return web.FileResponse(_CAMERA, headers={"Content-Type": "text/html", "Cache-Control": "no-cache"})
 
 # ---------- status ----------
 
@@ -263,6 +269,66 @@ async def h_ws(req):
         _ws_clients.discard(ws)
     return ws
 
+# ---------- camera ----------
+
+
+async def h_camera_status(req):
+    return web.json_response(await asyncio.to_thread(camera.cam.status))
+
+
+async def h_camera_stream(req):
+    """MJPEG (multipart/x-mixed-replace) for an <img>. fps=N caps the rate
+    (saves bandwidth through the tunnel)."""
+    cam = camera.cam
+    if cam.viewers >= config.CAMERA_MAX_VIEWERS:
+        return web.Response(status=503, text="too many camera viewers\n")
+    try:
+        gap = 1 / max(1, min(30, int(req.query.get("fps", "30"))))
+    except ValueError:
+        gap = 0
+    resp = web.StreamResponse(headers={
+        "Content-Type": "multipart/x-mixed-replace; boundary=frame",
+        "Cache-Control": "no-cache, no-store", "X-Accel-Buffering": "no"})
+    await resp.prepare(req)
+    cam.acquire()
+    seq, sent = cam.seq, 0.0
+    try:
+        while True:
+            jpeg, seq = await cam.next_frame(seq)
+            if not jpeg:
+                cam.start()                  # unplugged/stopped: retry once a second
+                await asyncio.sleep(1)
+                continue
+            now = asyncio.get_running_loop().time()
+            if now - sent < gap:
+                continue
+            sent = now
+            await resp.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n" % len(jpeg)
+                             + jpeg + b"\r\n")
+    except (ConnectionResetError, asyncio.CancelledError):
+        pass                                 # viewer went away
+    finally:
+        cam.release()
+    return resp
+
+
+async def h_camera_snapshot(req):
+    cam = camera.cam
+    cold = not cam.running()
+    cam.acquire()
+    try:
+        if cold:                             # let auto-exposure settle first
+            await asyncio.sleep(1.5)
+        jpeg, _ = await cam.next_frame(cam.seq)
+    finally:
+        cam.release()
+    if not jpeg:
+        return web.Response(status=503, text=(cam.error or "no frame from the camera") + "\n")
+    name = "camera_" + time.strftime("%Y%m%d_%H%M%S") + ".jpg"
+    return web.Response(body=jpeg, headers={
+        "Content-Type": "image/jpeg", "Cache-Control": "no-store",
+        "Content-Disposition": f'inline; filename="{name}"'})
+
 # ---------- redfish ----------
 
 
@@ -332,6 +398,10 @@ def main():
         web.post("/api/uart", h_uart_cfg),
         web.get("/api/uart/log", h_uart_log),
         web.get("/api/uart/stream", h_uart_stream),
+        web.get("/camera", h_camera_page),
+        web.get("/api/camera", h_camera_status),
+        web.get("/api/camera/stream", h_camera_stream),
+        web.get("/api/camera/snapshot", h_camera_snapshot),
         web.post("/api/redfish", h_redfish),
         web.get("/api/settings", h_settings_get),
         web.post("/api/settings", h_settings_set),

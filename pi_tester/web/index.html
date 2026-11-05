@@ -27,8 +27,15 @@ button.sec{background:transparent;color:var(--fg);border-color:var(--line)}
 .lvl.h{background:var(--ok);color:#fff;border-color:var(--ok)}
 .mono{font-family:Consolas,Menlo,monospace}
 pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px;max-height:260px;overflow:auto;white-space:pre-wrap;word-break:break-all;margin:6px 0 0}
-.terms{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:10px}
-.term{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.uhead{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+.uhead h2{margin:0}
+.tabs{display:flex;gap:2px}
+button.tab{position:relative;padding:3px 12px;font-size:12px;background:var(--bg);color:var(--fg);border:1px solid var(--line)}
+button.tab.on{background:var(--acc);border-color:var(--acc);color:#fff}
+button.tab.new::after{content:'';position:absolute;top:2px;right:2px;width:6px;height:6px;border-radius:50%;background:#f59e0b}
+.terms{display:flex;flex-direction:column}
+.term:not(.on){display:none}
+.term{flex:1;min-height:0;display:flex;flex-direction:column;border:1px solid var(--line);border-radius:6px;overflow:hidden}
 .term .bar{display:flex;align-items:center;gap:6px;padding:4px 6px;background:var(--bg);flex-wrap:wrap}
 .term .bar b{margin-right:auto}
 .term .bar input{width:90px;padding:2px 6px}
@@ -47,9 +54,42 @@ pre.out{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 .knob .ptr{stroke:var(--fg)}
 .knob text{fill:var(--fg);font:600 17px system-ui,sans-serif}
 .knob text.u{fill:var(--mut);font:11px system-ui,sans-serif}
+.mut{color:var(--mut)}
+.pwmside .ctl{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.pwmside .ctl input{width:84px}
+button.q{padding:2px 7px;font-size:12px}
+.camview{display:flex;align-items:center;justify-content:center;background:#000;border-radius:6px;overflow:hidden;aspect-ratio:4/3}
+.camview img{width:100%;height:100%;object-fit:contain}
+.camview span{color:#aaa;font-size:12px}
 #toast{position:fixed;right:16px;bottom:16px;padding:8px 12px;border-radius:6px;background:var(--bad);color:#fff;display:none}
 dialog{border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--fg);max-width:420px;width:92vw}
-@media (max-width:480px){.terms{grid-template-columns:1fr}main{padding:12px 8px}}
+@media (max-width:480px){main{padding:12px 8px}}
+/* Laptop/desktop: everything on one screen. Controls in one row on top, the
+ * tabbed console and the camera share the bottom row; long outputs scroll
+ * inside their own boxes. */
+@media (min-width:900px) and (min-height:560px){
+  html,body{height:100%}
+  body{display:flex;flex-direction:column}
+  header{padding:6px 12px;gap:10px}
+  /* top row as tall as the controls need; consoles get the rest (scrolls
+     only on very small windows, rather than squashing the consoles) */
+  main{flex:1;min-height:0;grid-template-columns:repeat(4,minmax(0,1fr));grid-template-rows:auto minmax(150px,1fr);gap:8px;padding:8px 12px}
+  section{display:flex;flex-direction:column;min-height:0;padding:8px 10px}
+  h2{margin:0 0 6px}
+  .row{margin:4px 0}
+  /* outputs take the card's spare height but never set it */
+  section>pre.out{flex:1 1 0;min-height:40px;max-height:none}
+  .knob{width:76px;height:76px}
+  .pwmch{gap:10px;padding:4px 0}
+  .pwmside{gap:3px}
+  section.uart,section.cam{grid-column:span 2}
+  .camview{flex:1;min-height:0;aspect-ratio:auto}
+  .terms{flex:1;min-height:0}
+  .term pre{flex:1;height:auto;min-height:0}
+}
+@media (min-width:900px) and (min-height:860px){section>pre.out{min-height:110px}}
+/* too narrow for one row of controls: 2 columns, page scrolls if it must */
+@media (min-width:900px) and (max-width:1099px) and (min-height:560px){main{flex:none;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:auto auto minmax(480px,1fr)}}
 </style>
 </head>
 <body>
@@ -60,6 +100,7 @@ dialog{border:1px solid var(--line);border-radius:8px;background:var(--card);col
   <span class="pill">Wi-Fi <b id="wifi" class="off">off</b></span>
   <span class="pill">DUT <b id="dut" class="mono">-</b></span>
   <span style="flex:1"></span>
+  <button class="sec" onclick="location.href='/camera'">Camera</button>
   <button class="sec" onclick="openSettings()">Settings</button>
 </header>
 
@@ -79,7 +120,7 @@ dialog{border:1px solid var(--line);border-radius:8px;background:var(--card);col
     <div class="row"><label>Bus</label>
       <select id="i2cBus"><option value="0">Bus 0</option><option value="1">Bus 1</option></select>
       <button onclick="i2cScan()">Scan</button>
-      <span class="mut" style="font-size:12px">speed is fixed per bus at boot (config.txt)</span></div>
+      <span class="mut" style="font-size:12px">speed fixed at boot</span></div>
     <div class="row"><label>Address</label><input id="i2cAddr" class="mono" placeholder="0x50" style="width:80px"></div>
     <div class="row"><label>Write</label><input id="i2cW" class="mono" placeholder="00 10 (hex bytes)" style="flex:1"></div>
     <div class="row"><label>Read</label><input id="i2cR" type="number" min="0" max="256" value="0" style="width:80px"> bytes
@@ -94,18 +135,29 @@ dialog{border:1px solid var(--line);border-radius:8px;background:var(--card);col
       <input id="rfP" class="mono" value="/redfish/v1" style="flex:1">
       <button onclick="redfish()">Send</button></div>
     <div class="row">
-      <button class="sec" onclick="rfQuick('/redfish/v1/Systems')">Systems</button>
-      <button class="sec" onclick="rfQuick('/redfish/v1/Managers')">Managers</button>
-      <button class="sec" onclick="rfQuick('/redfish/v1/Chassis')">Chassis</button>
-      <button class="sec" onclick="rfQuick('/redfish/v1/UpdateService/FirmwareInventory')">Firmware</button></div>
-    <textarea id="rfB" class="mono" rows="2" style="width:100%" placeholder='JSON body for POST/PATCH, e.g. {"IndicatorLED":"Lit"}'></textarea>
-    <div class="row"><span id="rfS" class="mut"></span></div>
+      <button class="sec q" onclick="rfQuick('/redfish/v1/Systems')">Systems</button>
+      <button class="sec q" onclick="rfQuick('/redfish/v1/Managers')">Managers</button>
+      <button class="sec q" onclick="rfQuick('/redfish/v1/Chassis')">Chassis</button>
+      <button class="sec q" onclick="rfQuick('/redfish/v1/UpdateService/FirmwareInventory')">Firmware</button>
+      <span id="rfS" class="mut"></span></div>
+    <textarea id="rfB" class="mono" rows="1" style="width:100%;resize:vertical" placeholder='JSON body for POST/PATCH, e.g. {"IndicatorLED":"Lit"}'></textarea>
     <pre id="rfOut" class="out mono"></pre>
   </section>
 
-  <section class="wide">
-    <h2>DUT UART consoles (USB-RS232 adapter) <span style="text-transform:none;font-weight:400">: click a console, then type</span></h2>
+  <section class="wide uart">
+    <div class="uhead"><h2>DUT UART console</h2><div class="tabs" id="utabs"></div>
+      <span class="mut" style="font-size:12px">click the console, then type</span></div>
     <div class="terms" id="terms"></div>
+  </section>
+
+  <section class="wide cam">
+    <div class="uhead"><h2>Camera</h2>
+      <label class="mut" style="font-size:12px"><input type="checkbox" id="camOn" onchange="camLive()"> live (5 fps)</label>
+      <span id="camS" class="mut" style="font-size:12px"></span>
+      <span style="flex:1"></span>
+      <button class="sec q" onclick="open('/api/camera/snapshot')">Snapshot</button>
+      <button class="sec q" onclick="open('/camera')">Full page</button></div>
+    <div class="camview"><img id="camImg" alt=""><span id="camMsg"></span></div>
   </section>
 </main>
 
@@ -160,9 +212,9 @@ function buildIO(){
       <div class="pwmside">
         <div><b>PWM ${i}</b> <span class="lvl" id="pe${i}">-</span></div>
         <span class="mut" id="pr${i}" style="font-size:12px"></span>
-        <div><input type="number" id="pf${i}" min="1" max="1000000" value="25000"> Hz</div>
-        <div><button onclick="setPwm(${i},true)">Apply freq</button>
-          <button class="sec" onclick="setPwm(${i},false)">Disable</button></div>
+        <div class="ctl"><input type="number" id="pf${i}" min="1" max="1000000" value="25000" title="frequency"> Hz
+          <button class="q" onclick="setPwm(${i},true)" title="apply frequency and enable">Apply</button>
+          <button class="sec q" onclick="setPwm(${i},false)" title="disable (pin low)">Off</button></div>
       </div></div>`;
   $('pwm').innerHTML=p;
   for(let i=0;i<2;i++) knobs[i]=makeKnob($('pk'+i),()=>sendDuty(i));
@@ -239,6 +291,7 @@ async function refresh(syncPwmInputs){
   });
   const anyOpen=s.uart.some(u=>u.connected);
   s.uart.forEach((u,i)=>{const e=$('us'+i);e.className=u.connected?'on':'off';
+    $('ut'+i).title=u.connected?'connected':'not connected';
     e.textContent=u.connected?`connected (${s.usb_dev})`:!s.usb_dev?'no adapter':anyOpen?'not on this adapter':`unsupported ${s.usb_dev}`;
     if(first) $('ub'+i).value=u.baud;});
   first=false;
@@ -273,17 +326,30 @@ async function redfish(){
 
 /* ---------- UART terminals ---------- */
 const MAXCH=200000, terms=[], dec=[];
+let uSel=0; try{uSel=+localStorage.getItem('uartTab')||0;}catch(e){}
+if(!(uSel>=0&&uSel<4)) uSel=0;
 function buildTerms(){
-  let h='';
-  for(let i=0;i<4;i++) h+=`<div class="term"><div class="bar"><b>UART ${i}</b><span id="us${i}" class="off" style="font-size:12px">-</span>
-      <input id="ub${i}" type="number" value="115200" title="baud"><button class="sec" onclick="setBaud(${i})">Set baud</button>
+  let h='', t='';
+  for(let i=0;i<4;i++) t+=`<button class="tab" id="ut${i}" onclick="showTerm(${i})">UART ${i}</button>`;
+  $('utabs').innerHTML=t;
+  for(let i=0;i<4;i++) h+=`<div class="term" id="tw${i}"><div class="bar"><b>UART ${i}</b><span id="us${i}" class="off" style="font-size:12px">-</span>
+      <input id="ub${i}" type="number" value="115200" title="baud"><button class="sec" onclick="setBaud(${i})">Baud</button>
       <button class="sec" onclick="clearTerm(${i})">Clear</button>
-      <button class="sec" onclick="location.href='/api/uart/log?port=${i}'">Download</button></div>
+      <button class="sec" onclick="location.href='/api/uart/log?port=${i}'" title="download the scrollback">Log</button></div>
     <pre tabindex="0" id="t${i}"></pre></div>`;
   $('terms').innerHTML=h;
   for(let i=0;i<4;i++){terms[i]=$('t'+i);dec[i]=new TextDecoder();
     terms[i].addEventListener('keydown',e=>onKey(i,e));
     terms[i].addEventListener('paste',e=>{e.preventDefault();send(i,e.clipboardData.getData('text').replace(/\r?\n/g,'\r'));});}
+  showTerm(uSel);
+}
+/* one console visible at a time; the others keep receiving in the background
+   and their tab gets a dot when new output arrives */
+function showTerm(i){
+  uSel=i; try{localStorage.setItem('uartTab',i);}catch(e){}
+  for(let k=0;k<4;k++){$('tw'+k).classList.toggle('on',k===i);$('ut'+k).classList.toggle('on',k===i);}
+  $('ut'+i).classList.remove('new');
+  terms[i].scrollTop=terms[i].scrollHeight; terms[i].focus({preventScroll:true});
 }
 async function setBaud(i){await api('/api/uart',{port:i,baud:+$('ub'+i).value});}
 async function clearTerm(i){await api('/api/uart',{port:i,clear:true});terms[i].textContent='';}
@@ -314,9 +380,11 @@ function writeTerm(i,bytes){
   if(cur.length>MAXCH) cur=cur.slice(-MAXCH*0.8);
   t.textContent=cur;
   if(stick) t.scrollTop=t.scrollHeight;
+  if(i!==uSel && s) $('ut'+i).classList.add('new');
 }
 function connectWs(){
-  ws=new WebSocket(`ws://${location.host}/ws`); ws.binaryType='arraybuffer';
+  /* wss behind an HTTPS proxy (Cloudflare): browsers block ws:// from https pages */
+  ws=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws`); ws.binaryType='arraybuffer';
   ws.onopen=()=>{terms.forEach(t=>t.textContent='');ws.send('hello');};
   ws.onmessage=e=>{if(typeof e.data==='string')return;const b=new Uint8Array(e.data);if(b[0]<4)writeTerm(b[0],b.subarray(1));};
   ws.onclose=()=>setTimeout(connectWs,2000);
@@ -339,7 +407,26 @@ async function saveSettings(reboot){
   $('dlg').close(); refresh();
 }
 
+/* ---------- camera ---------- */
+/* low-rate preview; the camera only runs while some page is watching */
+function camLive(){
+  const on=$('camOn').checked, img=$('camImg');
+  try{localStorage.setItem('camLive',on?'1':'0');}catch(e){}
+  if(on) img.src=`/api/camera/stream?fps=5&t=${Date.now()}`; else img.removeAttribute('src');
+  img.style.display=on?'':'none'; $('camMsg').textContent=on?'':'live view off';
+}
+$('camImg').onerror=()=>{ if($('camOn').checked) setTimeout(camLive,3000); };
+async function camStatus(){
+  try{const s=await (await fetch('/api/camera')).json();
+    $('camS').textContent=s.present?`${s.name}${s.running?` · ${s.width}×${s.height}`:''}`:'no camera';
+    $('camS').className=s.present?'on':'off';
+  }catch(e){}
+}
+let camPref='1'; try{camPref=localStorage.getItem('camLive')??'1';}catch(e){}
+$('camOn').checked=camPref==='1';
+
 buildIO(); buildTerms(); refresh(); setInterval(refresh,1000); connectWs();
+camLive(); camStatus(); setInterval(camStatus,5000);
 </script>
 </body>
 </html>

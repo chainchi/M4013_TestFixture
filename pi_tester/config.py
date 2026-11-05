@@ -36,6 +36,14 @@ UART_DEFAULT_BAUD = 115_200
 UART_RING_SIZE = 256 * 1024
 UART_RESCAN_S = 1.0
 
+# USB webcam (UVC, MJPEG). Empty = first one in /dev/v4l/by-id; or pin a path.
+CAMERA_DEVICE = ""
+CAMERA_SIZE = (1280, 720)              # the driver picks the nearest size it has
+CAMERA_FPS = 30
+CAMERA_JPEG_QUALITY = 80               # YUYV-only cameras are JPEG-encoded on the Pi
+CAMERA_IDLE_S = 5                      # stop capturing this long after the last viewer
+CAMERA_MAX_VIEWERS = 4
+
 REDFISH_TIMEOUT_S = 15
 REDFISH_MAX_BODY = 256 * 1024
 
