@@ -61,6 +61,11 @@ button.q{padding:2px 7px;font-size:12px}
 .camview{display:flex;align-items:center;justify-content:center;background:#000;border-radius:6px;overflow:hidden;aspect-ratio:4/3}
 .camview img{width:100%;height:100%;object-fit:contain}
 .camview span{color:#aaa;font-size:12px}
+.bottom{display:contents}
+.gutter{position:absolute;z-index:5;border-radius:3px;display:none;touch-action:none}
+.gutter.v{cursor:col-resize}.gutter.h{cursor:row-resize}
+.gutter:hover,.gutter.drag{background:var(--acc);opacity:.45}
+body.dragging{user-select:none}
 #toast{position:fixed;right:16px;bottom:16px;padding:8px 12px;border-radius:6px;background:var(--bad);color:#fff;display:none}
 dialog{border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--fg);max-width:420px;width:92vw}
 @media (max-width:480px){main{padding:12px 8px}}
@@ -88,6 +93,15 @@ dialog{border:1px solid var(--line);border-radius:8px;background:var(--card);col
   .term pre{flex:1;height:auto;min-height:0}
 }
 @media (min-width:900px) and (min-height:860px){section>pre.out{min-height:110px}}
+/* 4-column layout: the gaps between panels are draggable (sizes kept per browser) */
+@media (min-width:1100px) and (min-height:560px){
+  main{position:relative;grid-template-columns:minmax(0,var(--c0,1fr)) minmax(0,var(--c1,1fr)) minmax(0,var(--c2,1fr)) minmax(0,var(--c3,1fr));
+    grid-template-rows:var(--top,auto) minmax(150px,1fr)}
+  main>section{overflow:auto}
+  .bottom{display:grid;grid-column:1/-1;min-height:0;gap:8px;grid-template-columns:minmax(0,var(--b0,1fr)) minmax(0,var(--b1,1fr))}
+  .bottom section.uart,.bottom section.cam{grid-column:auto}
+  .gutter{display:block}
+}
 /* too narrow for one row of controls: 2 columns, page scrolls if it must */
 @media (min-width:900px) and (max-width:1099px) and (min-height:560px){main{flex:none;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:auto auto minmax(480px,1fr)}}
 </style>
@@ -100,6 +114,8 @@ dialog{border:1px solid var(--line);border-radius:8px;background:var(--card);col
   <span class="pill">Wi-Fi <b id="wifi" class="off">off</b></span>
   <span class="pill">DUT <b id="dut" class="mono">-</b></span>
   <span style="flex:1"></span>
+  <button class="sec" onclick="location.href='/system'">System</button>
+  <button class="sec" onclick="location.href='/agent'">Agent</button>
   <button class="sec" onclick="location.href='/camera'">Camera</button>
   <button class="sec" onclick="openSettings()">Settings</button>
 </header>
@@ -144,6 +160,7 @@ dialog{border:1px solid var(--line);border-radius:8px;background:var(--card);col
     <pre id="rfOut" class="out mono"></pre>
   </section>
 
+  <div class="bottom" id="bottom">
   <section class="wide uart">
     <div class="uhead"><h2>DUT UART console</h2><div class="tabs" id="utabs"></div>
       <span class="mut" style="font-size:12px">click the console, then type</span></div>
@@ -159,6 +176,7 @@ dialog{border:1px solid var(--line);border-radius:8px;background:var(--card);col
       <button class="sec q" onclick="open('/camera')">Full page</button></div>
     <div class="camview"><img id="camImg" alt=""><span id="camMsg"></span></div>
   </section>
+  </div>
 </main>
 
 <dialog id="dlg">
@@ -427,6 +445,55 @@ $('camOn').checked=camPref==='1';
 
 buildIO(); buildTerms(); refresh(); setInterval(refresh,1000); connectWs();
 camLive(); camStatus(); setInterval(camStatus,5000);
+
+/* ---------- drag the gaps between panels to resize them ---------- */
+/* column widths are stored as fr shares (the px widths at drop time), so they
+   scale with the window; the top row height is px. Double-click a gap to reset. */
+const LAY_MQ=matchMedia('(min-width:1100px) and (min-height:560px)'), MAIN=document.querySelector('main');
+let lay={}; try{lay=JSON.parse(localStorage.getItem('layout')||'{}')||{};}catch(e){}
+function applyLayout(){
+  for(const k of ['c0','c1','c2','c3','b0','b1']) MAIN.style.setProperty('--'+k,lay[k]?lay[k]+'fr':'1fr');
+  MAIN.style.setProperty('--top',lay.top?lay.top+'px':'auto');
+  try{localStorage.setItem('layout',JSON.stringify(lay));}catch(e){}
+  placeGutters();
+}
+const tops=()=>[...MAIN.children].filter(e=>e.tagName==='SECTION');
+const bots=()=>[...$('bottom').children];
+const gutters=[];
+function gutter(kind,keys,onDrag){
+  const g=document.createElement('div'); g.className='gutter '+kind; MAIN.appendChild(g); gutters.push(g);
+  g.addEventListener('pointerdown',e=>{
+    e.preventDefault(); g.setPointerCapture(e.pointerId); g.classList.add('drag'); document.body.classList.add('dragging');
+    const start=onDrag.start(); const x0=e.clientX, y0=e.clientY;
+    const move=ev=>{onDrag.move(start,ev.clientX-x0,ev.clientY-y0); applyLayout();};
+    const up=()=>{g.removeEventListener('pointermove',move); g.classList.remove('drag'); document.body.classList.remove('dragging');};
+    g.addEventListener('pointermove',move); g.addEventListener('pointerup',up,{once:true}); g.addEventListener('pointercancel',up,{once:true});
+  });
+  g.addEventListener('dblclick',()=>{keys.forEach(k=>delete lay[k]); applyLayout();});
+  return g;
+}
+/* two neighbours share the dragged amount; every width in the group is re-recorded */
+function splitter(group,keys,i,min){
+  return {start:()=>group().map(e=>e.getBoundingClientRect().width),
+    move:(w,dx)=>{dx=Math.max(min-w[i],Math.min(w[i+1]-min,dx));
+      const n=w.slice(); n[i]+=dx; n[i+1]-=dx; keys.forEach((k,j)=>lay[k]=Math.round(n[j]));}};
+}
+const TOPK=['c0','c1','c2','c3'], BOTK=['b0','b1'];
+for(let i=0;i<3;i++) gutter('v',TOPK,splitter(tops,TOPK,i,140));
+gutter('v',BOTK,splitter(bots,BOTK,0,220));
+gutter('h',['top'],{start:()=>tops()[0].getBoundingClientRect().height,
+  move:(h,dx,dy)=>{lay.top=Math.round(Math.max(90,Math.min(MAIN.clientHeight-220,h+dy)));}});
+function placeGutters(){
+  if(!LAY_MQ.matches) return;
+  const m=MAIN.getBoundingClientRect(), t=tops().map(e=>e.getBoundingClientRect()), b=bots().map(e=>e.getBoundingClientRect());
+  const put=(g,x,y,w,h)=>Object.assign(g.style,{left:x-m.left+'px',top:y-m.top+MAIN.scrollTop+'px',width:w+'px',height:h+'px'});
+  for(let i=0;i<3;i++) put(gutters[i],t[i].right,t[i].top,t[i+1].left-t[i].right,t[i].height);
+  put(gutters[3],b[0].right,b[0].top,b[1].left-b[0].right,b[0].height);
+  put(gutters[4],t[0].left,t[0].bottom,t[3].right-t[0].left,b[0].top-t[0].bottom);
+}
+new ResizeObserver(placeGutters).observe(MAIN);
+LAY_MQ.addEventListener('change',placeGutters);
+applyLayout();
 </script>
 </body>
 </html>

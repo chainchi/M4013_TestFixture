@@ -9,7 +9,7 @@ import time
 
 from aiohttp import WSMsgType, web
 
-from . import camera, config, i2c_ctrl, io_ctrl, net, redfish, settings, uart_hub
+from . import agent, camera, config, i2c_ctrl, io_ctrl, net, redfish, settings, system_view, uart_hub
 
 WS_CHUNK = 4096
 PUMP_PERIOD_S = 0.03
@@ -283,14 +283,15 @@ async def h_camera_stream(req):
     if cam.viewers >= config.CAMERA_MAX_VIEWERS:
         return web.Response(status=503, text="too many camera viewers\n")
     try:
-        gap = 1 / max(1, min(30, int(req.query.get("fps", "30"))))
+        fps = max(1, min(30, int(req.query.get("fps", "30"))))
     except ValueError:
-        gap = 0
+        fps = 30
+    gap = 1 / fps
     resp = web.StreamResponse(headers={
         "Content-Type": "multipart/x-mixed-replace; boundary=frame",
         "Cache-Control": "no-cache, no-store", "X-Accel-Buffering": "no"})
     await resp.prepare(req)
-    cam.acquire()
+    cam.acquire(fps)
     seq, sent = cam.seq, 0.0
     try:
         while True:
@@ -300,7 +301,7 @@ async def h_camera_stream(req):
                 await asyncio.sleep(1)
                 continue
             now = asyncio.get_running_loop().time()
-            if now - sent < gap:
+            if now - sent < gap * 0.8:          # frames come at camera-frame boundaries
                 continue
             sent = now
             await resp.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n" % len(jpeg)
@@ -308,7 +309,7 @@ async def h_camera_stream(req):
     except (ConnectionResetError, asyncio.CancelledError):
         pass                                 # viewer went away
     finally:
-        cam.release()
+        cam.release(fps)
     return resp
 
 
@@ -379,6 +380,14 @@ async def h_reboot(req):
 
 async def _on_startup(app):
     app["pump"] = asyncio.create_task(_pump())
+    await agent.start(app)
+
+
+async def _on_shutdown(app):
+    # consoles and the agent page stay connected for good; close them so a
+    # restart doesn't wait for the browsers
+    for ws in list(_ws_clients) + list(agent.agent.clients):
+        await ws.close(code=1001, message=b"server restarting")
 
 
 def main():
@@ -407,7 +416,13 @@ def main():
         web.post("/api/settings", h_settings_set),
         web.post("/api/reboot", h_reboot),
         web.get("/ws", h_ws),
+        *agent.ROUTES,
+        *system_view.ROUTES,
     ])
+    system_view.extra = lambda: {"console_pages": len(_ws_clients), "uart_streams": _streams,
+                                 "camera_viewers": camera.cam.viewers}
     app.on_startup.append(_on_startup)
+    app.on_shutdown.append(_on_shutdown)
     print(f"web: serving on port {config.HTTP_PORT}", flush=True)
-    web.run_app(app, port=config.HTTP_PORT, print=None)
+    # endless camera/UART streams are cancelled after this, not waited for
+    web.run_app(app, port=config.HTTP_PORT, print=None, shutdown_timeout=3)

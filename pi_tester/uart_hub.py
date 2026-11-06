@@ -21,6 +21,7 @@ class _Port:
         self.baud = config.UART_DEFAULT_BAUD
         self.ring = bytearray(config.UART_RING_SIZE)
         self.total = 0                 # bytes ever received
+        self.tx = 0                    # bytes ever sent
         self.base = 0                  # bytes dropped by clear()
 
 
@@ -49,7 +50,15 @@ def _discover():
         m = re.search(r"-if(\d+)", link)
         return (re.sub(r"-if\d+.*", "", link), int(m.group(1)) if m else 0)
 
-    return sorted(glob.glob("/dev/serial/by-id/*"), key=key)
+    devs = sorted(glob.glob("/dev/serial/by-id/*"), key=key)
+    # Clone adapters can share a serial number, so two of them get one by-id
+    # link; add any tty that link misses under its by-path name (per USB socket).
+    seen = {os.path.realpath(d) for d in devs}
+    for d in sorted(glob.glob("/dev/serial/by-path/*")):
+        if os.path.realpath(d) not in seen:
+            seen.add(os.path.realpath(d))
+            devs.append(d)
+    return devs
 
 
 def _ring_put(p, data):
@@ -158,6 +167,7 @@ def write(port, data):
     if ser is None:
         raise ConnectionError("port not connected")
     ser.write(data)
+    p.tx += len(data)
 
 
 def clear(port):
@@ -169,6 +179,10 @@ def clear(port):
 
 def rx_total(port):
     return _ports[port].total
+
+
+def tx_total(port):
+    return _ports[port].tx
 
 
 def read_since(port, pos, max_len):

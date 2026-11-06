@@ -1,0 +1,754 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pi Test System</title>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--fg:#111418;--mut:#4b5563;--line:#c9ced6;--acc:#1d4ed8;
+  --ok:#15803d;--warn:#b45309;--bad:#c81e1e;--idle:#6b7280;--act:#1d4ed8;--in:#c2410c;
+  --board:#eef6f0;--boardline:#86b996;--node:#fff;--lcd:#0b3d2e;--lcdfg:#7dfc9f}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1115;--card:#181b21;--fg:#f1f3f5;--mut:#b4bac4;--line:#3a404b;--acc:#7aa2ff;
+  --ok:#4ade80;--warn:#fbbf24;--bad:#ff6b6b;--idle:#8a93a2;--act:#60a5fa;--in:#fb923c;
+  --board:#0f1d16;--boardline:#2f5a40;--node:#1b1f26;--lcd:#06261b;--lcdfg:#6cf08f}}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;display:flex;flex-direction:column;overflow:hidden;background:var(--bg);color:var(--fg);font:14px/1.4 system-ui,Segoe UI,Arial,sans-serif}
+body.big{font-size:16px}
+header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 16px;background:var(--card);border-bottom:1px solid var(--line)}
+header h1{font-size:17px;margin:0}
+body.big header h1{font-size:20px}
+.mut{color:var(--mut)}
+a.btn,button{font:inherit;color:var(--fg);background:transparent;border:1px solid var(--line);border-radius:6px;padding:4px 10px;text-decoration:none;cursor:pointer}
+body.big a.btn,body.big button{padding:6px 12px}
+button.on{background:var(--acc);border-color:var(--acc);color:#fff}
+label.chk{display:flex;align-items:center;gap:6px;color:var(--mut)}
+label.chk input{width:18px;height:18px}
+/* plain-language summary */
+#summary{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:8px 16px 0;padding:6px 12px;border-radius:8px;flex:none;border:2px solid var(--line);background:var(--card);font-size:16px;font-weight:600}
+body.big #summary{font-size:19px;padding:7px 14px}
+#summary .ic{display:inline-flex;align-items:center;justify-content:center;width:1.6em;height:1.6em;border-radius:50%;color:#fff;flex:none}
+#summary.ok{border-color:var(--ok)}#summary.ok .ic{background:var(--ok)}
+#summary.warn{border-color:var(--warn)}#summary.warn .ic{background:var(--warn)}
+#summary.bad{border-color:var(--bad)}#summary.bad .ic{background:var(--bad)}
+#summary.lost{border-color:var(--bad)}#summary.lost .ic{background:var(--bad)}
+#summary .items{display:flex;gap:8px;flex-wrap:wrap;font-weight:500}
+#summary .items button{font-size:.85em;border-width:2px}
+#summary .items button.bad{border-color:var(--bad)}#summary .items button.warn{border-color:var(--warn)}
+#summary .age{margin-left:auto;font-size:13px;font-weight:400;color:var(--mut)}
+/* the whole page fits the window: the diagram scales into what is left, only the event list scrolls */
+main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:10px;padding:8px 16px 10px}
+.diagram{min-height:0;background:var(--card);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.diagram svg{display:block;width:100%;height:100%}
+/* small screens (phones, narrow windows): stack and scroll instead of shrinking the text away */
+@media (max-width:900px),(max-height:480px){
+  body{overflow:auto;height:auto}
+  main{display:flex;flex-direction:column}
+  .diagram{overflow-x:auto}
+  .diagram svg{height:auto;min-width:900px}
+  #log{max-height:50vh}
+}
+.side{display:flex;flex-direction:column;gap:10px;min-height:0}
+section{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;min-height:0}
+h2{font-size:13px;margin:0 0 8px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);display:flex;align-items:center;gap:8px}
+body.big h2{font-size:15px}
+h2 button{margin-left:auto;padding:1px 8px;font-size:12px;text-transform:none;letter-spacing:0}
+#log{flex:1;min-height:60px;overflow:auto;margin:0;padding:0;list-style:none;font-size:13px}
+body.big #log{font-size:15.5px}
+#log li{display:grid;grid-template-columns:auto auto 1fr;gap:8px;padding:5px 0;border-bottom:1px solid var(--line);align-items:start}
+#log time{color:var(--mut);font-family:Consolas,Menlo,monospace;font-size:.9em}
+#log b{width:1.3em;text-align:center}
+#log li.warn b,#log li.warn span{color:var(--warn)}#log li.bad b,#log li.bad span{color:var(--bad)}#log li.ok b{color:var(--ok)}
+#log li.new{animation:newrow 2s ease-out}
+@keyframes newrow{from{background:color-mix(in srgb,var(--acc) 25%,transparent)}}
+.legend{display:grid;grid-template-columns:44px 1fr;gap:5px 8px;align-items:center;font-size:13px;line-height:1.25}
+body.big .legend{font-size:14.5px}
+.legend svg{display:block}
+/* diagram */
+svg text{fill:var(--fg);font-family:system-ui,Segoe UI,Arial,sans-serif}
+.board{fill:var(--board);stroke:var(--boardline);stroke-width:2}
+.boardtitle{font:600 15px system-ui,sans-serif;fill:var(--mut)}
+.coltitle{font:700 13px system-ui,sans-serif;fill:var(--mut);letter-spacing:.08em}
+.node rect.box{fill:var(--node);stroke:var(--idle);stroke-width:3;transition:stroke .4s,fill .4s}
+.node .title{font:700 14px system-ui,sans-serif}
+.node .stl{font:700 12.5px system-ui,sans-serif}
+.node .sub{font:12px system-ui,sans-serif;fill:var(--mut)}
+.node .sub.hi{fill:var(--fg)}
+.node .icon circle{fill:var(--idle)}
+.node .icon text{fill:#fff;font:800 14px system-ui,sans-serif}
+.node.link{cursor:pointer}
+.node.link:hover rect.box{stroke-width:5}
+.st-ok rect.box{stroke:var(--ok);fill:color-mix(in srgb,var(--ok) 7%,var(--node))}.st-ok .icon circle{fill:var(--ok)}.st-ok .stl{fill:var(--ok)}
+.st-act rect.box{stroke:var(--act);fill:color-mix(in srgb,var(--act) 10%,var(--node))}.st-act .icon circle{fill:var(--act)}.st-act .stl{fill:var(--act)}
+.st-warn rect.box{stroke:var(--warn);fill:color-mix(in srgb,var(--warn) 12%,var(--node))}.st-warn .icon circle{fill:var(--warn)}.st-warn .stl{fill:var(--warn)}
+.st-bad rect.box{stroke:var(--bad);fill:color-mix(in srgb,var(--bad) 14%,var(--node));animation:alarm 1.2s ease-in-out infinite}.st-bad .icon circle{fill:var(--bad)}.st-bad .stl{fill:var(--bad)}
+.st-idle .stl{fill:var(--idle)}
+.st-act .icon{animation:spin 2.4s linear infinite;transform-box:fill-box;transform-origin:center}
+.st-warn .icon,.st-bad .icon{animation:pulse 1.2s ease-in-out infinite}
+.node.flash rect.box{animation:flash .5s ease-in-out 6;stroke-width:6}
+@keyframes flash{50%{stroke:var(--acc);filter:drop-shadow(0 0 10px var(--acc))}}
+@keyframes pulse{50%{opacity:.35}}
+@keyframes alarm{50%{stroke-opacity:.3}}
+@keyframes spin{to{transform:rotate(360deg)}}
+.stale .node rect.box,.stale .edge .base{stroke:var(--idle)!important}
+.edge .base{fill:none;stroke:var(--line);stroke-width:4;transition:stroke .4s}
+.edge.ok .base{stroke:color-mix(in srgb,var(--ok) 50%,var(--line))}
+.edge.bad .base{stroke:var(--bad);stroke-dasharray:8 7}
+.edge.on .base{stroke:color-mix(in srgb,var(--act) 45%,var(--line));stroke-width:6}
+.edge .dot{stroke:var(--card);stroke-width:1.5}
+.edge .dot.out{fill:var(--act)}.edge .dot.in{fill:var(--in)}
+.bubble rect{fill:var(--card);stroke:var(--act);stroke-width:1.5}
+.bubble text{font:700 11.5px Consolas,Menlo,monospace;fill:var(--fg)}
+.tile rect{fill:var(--node);stroke:var(--line);stroke-width:1.5}
+.tile .tv{font:700 18px system-ui,sans-serif}
+.tile .tn{font:12px system-ui,sans-serif;fill:var(--mut)}
+.tile polyline{fill:none;stroke:var(--acc);stroke-width:2;opacity:.85}
+.tile.warn rect{stroke:var(--warn);stroke-width:3}.tile.bad rect{stroke:var(--bad);stroke-width:3}
+.lcd{fill:var(--lcd)}
+.lcdt{font:700 13px Consolas,Menlo,monospace;fill:var(--lcdfg)}
+.ledlbl{font:12px system-ui,sans-serif;fill:var(--mut)}
+.ledlbl.lit{font-weight:700;fill:var(--fg)}
+.led{stroke:var(--mut);stroke-width:1.5}
+.port rect{fill:var(--bg);stroke:var(--line);stroke-width:2}
+.port.on rect{stroke:var(--ok)}
+.port text{font:12px system-ui,sans-serif}
+.port circle{fill:var(--idle)}
+.port.rx circle{fill:var(--in)}.port.tx circle{fill:var(--act)}
+/* large text */
+svg.big .node .title{font-size:18px}
+svg.big .node .stl{font-size:16px}
+svg.big .node .sub{font-size:15px}
+svg.big .node .icon text{font-size:16px}
+svg.big .tile .tv{font-size:22px}
+svg.big .tile .tn{font-size:13.5px}
+svg.big .coltitle{font-size:15px}
+svg.big .boardtitle{font-size:17px}
+svg.big .bubble text{font-size:14px}
+svg.big .lcdt{font-size:14.5px}
+svg.big .ledlbl{font-size:12.5px}
+svg.big .port text{font-size:13.5px}
+@media (prefers-reduced-motion:reduce){.st-act .icon,.st-warn .icon,.st-bad .icon,.st-bad rect.box,.node.flash rect.box{animation:none}}
+</style>
+</head>
+<body class="big">
+<header>
+  <a class="btn" href="/">&larr; Test host</a>
+  <h1>System</h1>
+  <span style="flex:1"></span>
+  <button id="sizeB" onclick="toggleSize()" title="Switch between large and normal text">Text: Large</button>
+  <label class="chk" title="Read the PSU simulator, EEPROM and LM75 (read-only I2C traffic)"><input type="checkbox" id="i2cpoll" checked> Read I2C devices</label>
+  <button id="pause" onclick="togglePause()">Pause</button>
+  <a class="btn" href="/agent">Agent</a>
+  <a class="btn" href="/camera">Camera</a>
+</header>
+<div id="summary" role="status" aria-live="polite"><span class="ic">…</span><span id="sumText">Connecting to the tester…</span><span class="items" id="sumItems"></span><span class="age" id="age"></span></div>
+<main>
+  <div class="diagram" id="dia">
+    <svg id="svg" viewBox="8 14 1386 872" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Live diagram of the Pi test host"></svg>
+  </div>
+  <div class="side">
+    <section style="flex:1">
+      <h2>What just happened <button onclick="clearLog()">Clear</button></h2>
+      <ul id="log"></ul>
+    </section>
+    <section style="flex:none">
+      <h2>How to read it</h2>
+      <div class="legend" id="legend"></div>
+    </section>
+  </div>
+</main>
+<script>
+const NS = 'http://www.w3.org/2000/svg';
+const svg = document.getElementById('svg');
+const $ = id => document.getElementById(id);
+function el(tag, attrs, parent, text){
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs || {}) e.setAttribute(k, attrs[k]);
+  if (text != null) e.textContent = text;
+  (parent || svg).appendChild(e);
+  return e;
+}
+const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+let big = true;
+try { big = localStorage.getItem('sysBig') !== '0'; } catch (e) {}
+
+// status: icon, word and colour class; the word and icon carry the meaning without colour
+const ST = {ok:['✓', 'OK'], act:['⇄', 'Busy'], warn:['!', 'Check'], bad:['✕', 'Down'], idle:['–', 'Off']};
+
+// ---------- layout ----------
+const L = 20, P = 290, R = 1110;
+const NODES = {
+  lan:     {x:L, y:190, w:230, h:100, t:'LAN clients'},
+  wifiap:  {x:L, y:305, w:230, h:100, t:'Wi-Fi network'},
+  cf:      {x:L, y:420, w:230, h:100, t:'Cloudflare Access'},
+  llm:     {x:L, y:535, w:230, h:100, t:'LLM provider'},
+  bmc:     {x:L, y:690, w:230, h:100, t:'DUT BMC (Redfish)'},
+  eth0:    {x:310, y:190, w:180, h:100, t:'eth0', href:'/'},
+  wlan0:   {x:310, y:305, w:180, h:100, t:'wlan0'},
+  cfd:     {x:310, y:420, w:180, h:100, t:'cloudflared'},
+  redfish: {x:310, y:690, w:180, h:100, t:'Redfish client', href:'/'},
+  web:     {x:560, y:205, w:220, h:160, t:'Web server', href:'/'},
+  agent:   {x:560, y:520, w:220, h:160, t:'AI agent', href:'/agent'},
+  io:      {x:840, y:165, w:210, h:110, t:'GPIO / PWM', href:'/'},
+  i2c:     {x:840, y:290, w:210, h:150, t:'I2C master', href:'/'},
+  uart:    {x:840, y:455, w:210, h:125, t:'UART hub', href:'/'},
+  cam:     {x:840, y:600, w:210, h:110, t:'Camera capture', href:'/camera'},
+  leds:    {x:R, y:150, w:275, h:130, t:'Bench LEDs', href:'/', art:true},
+  eeprom:  {x:R, y:292, w:275, h:72,  t:'EEPROM 24C02', href:'/'},
+  lm75:    {x:R, y:376, w:275, h:72,  t:'LM75 temp sensor', href:'/'},
+  psu:     {x:R, y:460, w:275, h:168, t:'PSU simulator', href:'/', art:true},
+  uartdev: {x:R, y:640, w:275, h:118, t:'USB-serial adapters', href:'/', art:true},
+  camdev:  {x:R, y:770, w:275, h:92,  t:'USB camera', href:'/camera'},
+};
+// [from, side, to, side, which way "forward" goes: 'in' = toward the Pi, 'out' = away from it]
+const EDGES = {
+  'lan-eth0':     ['lan','r','eth0','l','in'],
+  'wifiap-wlan0': ['wifiap','r','wlan0','l','in'],
+  'cf-cfd':       ['cf','r','cfd','l','in'],
+  'llm-agent':    ['llm','r','agent','l','in'],
+  'bmc-redfish':  ['bmc','r','redfish','l','in'],
+  'eth0-web':     ['eth0','r','web','l','in'],
+  'wlan0-web':    ['wlan0','r','web','l','in'],
+  'cfd-web':      ['cfd','r','web','l','in'],
+  'web-agent':    ['web','b','agent','t','out'],
+  'agent-redfish':['agent','b','redfish','r','out'],
+  'web-io':       ['web','r','io','l','out'],
+  'web-i2c':      ['web','r','i2c','l','out'],
+  'web-uart':     ['web','r','uart','l','out'],
+  'web-cam':      ['web','r','cam','l','out'],
+  'io-leds':      ['io','r','leds','l','out'],
+  'i2c-eeprom':   ['i2c','r','eeprom','l','out'],
+  'i2c-lm75':     ['i2c','r','lm75','l','out'],
+  'i2c-psu':      ['i2c','r','psu','l','out'],
+  'uart-uartdev': ['uart','r','uartdev','l','out'],
+  'cam-camdev':   ['cam','r','camdev','l','out'],
+};
+const BUBBLE = {'lan-eth0':.45, 'wifiap-wlan0':.45, 'i2c-psu':.55, 'uart-uartdev':.5, 'cam-camdev':.5, 'llm-agent':.3};
+const SPREAD = {web_r:[-55,-20,20,55], web_l:[-50,0,50], i2c_r:[-40,0,40]};
+
+function anchor(n, side, o){
+  return side === 'r' ? [n.x + n.w, n.y + n.h/2 + o] : side === 'l' ? [n.x, n.y + n.h/2 + o]
+       : side === 't' ? [n.x + n.w/2 + o, n.y] : [n.x + n.w/2 + o, n.y + n.h];
+}
+function edgePaths(){
+  const used = {}, out = {};
+  for (const id in EDGES){
+    const [a, sa, b, sb] = EDGES[id];
+    const ka = a + '_' + sa, kb = b + '_' + sb;
+    used[ka] = (used[ka] || 0) + 1; used[kb] = (used[kb] || 0) + 1;
+    const oa = (SPREAD[ka] || [])[used[ka] - 1] || 0, ob = (SPREAD[kb] || [])[used[kb] - 1] || 0;
+    const p = anchor(NODES[a], sa, oa), q = anchor(NODES[b], sb, ob);
+    const dx = Math.max(40, Math.abs(q[0] - p[0]) / 2), dy = Math.max(40, Math.abs(q[1] - p[1]) / 2);
+    const c1 = sa === 'r' ? [p[0] + dx, p[1]] : sa === 'b' ? [p[0], p[1] + dy] : [p[0] - dx, p[1]];
+    const c2 = sb === 'l' ? [q[0] - dx, q[1]] : sb === 't' ? [q[0], q[1] - dy] : [q[0] + dx, q[1]];
+    out[id] = `M${p} C${c1} ${c2} ${q}`;
+  }
+  return out;
+}
+
+const TILES = ['cpu', 'temp', 'mem', 'load', 'eth', 'wifi'];
+const TILE_NAME = {cpu:'CPU', temp:'Chip temp', mem:'Memory', load:'Load', eth:'Wired traffic', wifi:'Wi-Fi traffic'};
+let ui;
+const hist = {cpu:[], temp:[], mem:[], load:[], eth:[], wifi:[]};
+const MAXDOTS = 5;
+
+function build(){
+  svg.innerHTML = '';
+  svg.classList.toggle('big', big);
+  document.body.classList.toggle('big', big);
+  $('sizeB').textContent = 'Text: ' + (big ? 'Large' : 'Normal');
+  ui = {nodes:{}, edges:{}, tiles:{}};
+  el('text', {x:L, y:big ? 170 : 172, class:'coltitle'}, null, 'NETWORK SIDE');
+  el('text', {x:R, y:132, class:'coltitle'}, null, 'WIRED TO THE BENCH');
+  el('rect', {x:P, y:20, width:790, height:860, rx:18, class:'board'});
+  ui.boardTitle = el('text', {x:P + 20, y:46, class:'boardtitle'}, null, 'Raspberry Pi 5');
+  TILES.forEach((k, i) => {
+    const g = el('g', {class:'tile', transform:`translate(${310 + i * 126},60)`});
+    el('rect', {width:118, height:86, rx:8}, g);
+    const v = el('text', {x:10, y:big ? 30 : 28, class:'tv'}, g, '-');
+    el('text', {x:10, y:big ? 49 : 45, class:'tn'}, g, TILE_NAME[k]);
+    const pl = el('polyline', {points:''}, g);
+    ui.tiles[k] = {g, v, pl};
+  });
+  ui.svcLine = el('text', {x:P + 20, y:866, style:`font:${big ? 14 : 12}px system-ui;fill:var(--mut)`}, null, '');
+  const paths = edgePaths();
+  for (const id in EDGES){
+    const g = el('g', {class:'edge'});
+    const base = el('path', {d:paths[id], class:'base'}, g);
+    const tip = el('title', {}, g, '');
+    const dots = [];
+    for (let i = 0; i < MAXDOTS * 2; i++) dots.push(el('circle', {r:big ? 6.5 : 5.5, class:'dot', visibility:'hidden'}, g));
+    ui.edges[id] = {g, base, tip, dots, len:0, fwd:0, back:0, phase:[Math.random() * 500, Math.random() * 500]};
+  }
+  for (const id in NODES){
+    const n = NODES[id];
+    const g = el('g', {class:'node' + (n.href ? ' link' : ''), transform:`translate(${n.x},${n.y})`});
+    el('rect', {class:'box', width:n.w, height:n.h, rx:12}, g);
+    const ig = el('g', {class:'icon'}, g);
+    el('circle', {cx:20, cy:22, r:big ? 13 : 11}, ig);
+    const icon = el('text', {x:20, y:22, 'text-anchor':'middle', 'dominant-baseline':'central'}, ig, '–');
+    el('text', {class:'title', x:big ? 41 : 38, y:big ? 28 : 27}, g, n.t);
+    const stl = el('text', {class:'stl', x:12, y:big ? 56 : 50}, g, '');
+    const tip = el('title', {}, g, n.t);
+    const subs = [];
+    if (!n.art){
+      const lh = big ? 20 : 16, y0 = (big ? 56 : 50) + lh;
+      for (let y = y0; y <= n.h - 8; y += lh) subs.push(el('text', {class:'sub', x:12, y}, g, ''));
+    }
+    if (n.href) g.addEventListener('click', () => location.href = n.href);
+    ui.nodes[id] = {g, icon, stl, subs, tip, n, st:null};
+  }
+  // bubbles (rate labels) above the links and nodes
+  for (const id in BUBBLE){
+    const e = ui.edges[id];
+    const pt = e.base.getPointAtLength(e.base.getTotalLength() * BUBBLE[id]);
+    const g = el('g', {class:'bubble', transform:`translate(${pt.x},${pt.y - (big ? 22 : 18)})`, visibility:'hidden'});
+    const r = el('rect', {x:-30, y:-12, width:60, height:big ? 24 : 20, rx:10}, g);
+    const t = el('text', {x:0, y:big ? 5 : 3, 'text-anchor':'middle'}, g, '');
+    e.bubble = {g, r, t};
+  }
+  for (const id in ui.edges) ui.edges[id].len = ui.edges[id].base.getTotalLength();
+  // LEDs
+  const lg = ui.nodes.leds.g;
+  ui.ledNames = ['OUT0', 'OUT1', 'IN0', 'IN1', 'PWM0', 'PWM1'];
+  ui.leds = ui.ledNames.map((name, i) => {
+    const cx = 24 + i * 45.5;
+    const c = el('circle', {class:'led', cx, cy:big ? 84 : 80, r:big ? 15 : 13, fill:'var(--bg)'}, lg);
+    const t = el('text', {class:'ledlbl', x:cx, y:big ? 120 : 114, 'text-anchor':'middle'}, lg, name);
+    return {c, t};
+  });
+  ui.ledColor = ['#ef4444', '#ef4444', '#22c55e', '#22c55e', '#3b82f6', '#f59e0b'];
+  // PSU LCD
+  const pg = ui.nodes.psu.g;
+  el('rect', {class:'lcd', x:10, y:big ? 66 : 60, width:255, height:96, rx:6}, pg);
+  ui.lcd = [0, 1, 2, 3].map(i => el('text', {class:'lcdt', x:18, y:(big ? 88 : 81) + i * 21}, pg, ''));
+  // UART ports
+  const ug = ui.nodes.uartdev.g;
+  ui.ports = [0, 1, 2, 3].map(i => {
+    const g = el('g', {class:'port', transform:`translate(${10 + i * 65},${big ? 66 : 60})`}, ug);
+    el('rect', {width:59, height:46, rx:6}, g);
+    el('text', {x:7, y:18, style:'font-weight:700'}, g, 'P' + i);
+    const c = el('circle', {cx:46, cy:13, r:6}, g);
+    const t = el('text', {x:7, y:38}, g, '');
+    return {g, c, t};
+  });
+  buildLegend();
+}
+
+function buildLegend(){
+  const items = [
+    ['ok', 'OK: working normally'], ['act', 'Busy: working right now'], ['warn', 'Check: needs a look'],
+    ['bad', 'Down: not working or missing'], ['idle', 'Off: not set up or not checked']];
+  const lg = $('legend');
+  lg.innerHTML = '';
+  for (const [k, txt] of items){
+    const s = document.createElementNS(NS, 'svg');
+    s.setAttribute('width', 44); s.setAttribute('height', 26); s.setAttribute('viewBox', '0 0 52 28');
+    const g = el('g', {class:'node st-' + k}, s);
+    el('rect', {class:'box', x:2, y:2, width:48, height:24, rx:6}, g);
+    const ig = el('g', {class:'icon', transform:'translate(-6,-8)'}, g);
+    el('circle', {cx:32, cy:22, r:9}, ig);
+    el('text', {x:32, y:22, 'text-anchor':'middle', 'dominant-baseline':'central', style:'font-size:12px'}, ig, ST[k][0]);
+    const d = document.createElement('span'); d.textContent = txt;
+    lg.append(s, d);
+  }
+  const dotRow = (cls, txt) => {
+    const s = document.createElementNS(NS, 'svg');
+    s.setAttribute('width', 44); s.setAttribute('height', 18); s.setAttribute('viewBox', '0 0 52 20');
+    el('line', {x1:2, y1:10, x2:50, y2:10, style:'stroke:var(--line);stroke-width:4'}, s);
+    [12, 26, 40].forEach(x => el('circle', {cx:x, cy:10, r:5, class:'dot ' + cls, style:`fill:var(--${cls === 'out' ? 'act' : 'in'})`}, s));
+    const d = document.createElement('span'); d.textContent = txt;
+    lg.append(s, d);
+  };
+  dotRow('out', 'Blue dots: data going out from the Pi');
+  dotRow('in', 'Orange dots: data coming in to the Pi');
+  const d = document.createElement('span'); d.style.gridColumn = '1/-1'; d.className = 'mut';
+  d.textContent = 'More dots and faster dots mean more data. A dashed red line is a broken link. Click a block to open its page.';
+  lg.append(d);
+}
+
+// ---------- formatting ----------
+const fmtBytes = r => r == null ? '-' : r < 1024 ? Math.round(r) + ' B/s' : r < 1048576 ? (r / 1024).toFixed(1) + ' kB/s' : (r / 1048576).toFixed(2) + ' MB/s';
+function fmtDur(s){
+  const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+  return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m ${Math.floor(s % 60)}s`;
+}
+const hex4 = v => (v >>> 0).toString(16).toUpperCase().padStart(4, '0');
+const fit = (s, w, px) => { const max = Math.floor(w / (px * 0.56)); return s.length > max ? s.slice(0, max - 1) + '…' : s; };
+
+// st: ok|act|warn|bad|idle; word: plain-language status shown big; lines: details (! = emphasised)
+function setNode(id, st, word, lines, tip){
+  const u = ui.nodes[id];
+  if (u.st && u.st !== st) flash(id);
+  u.st = st;
+  u.reason = word;
+  u.g.setAttribute('class', 'node st-' + st + (u.n.href ? ' link' : '') + (u.g.classList.contains('flash') ? ' flash' : ''));
+  u.icon.textContent = ST[st][0];
+  u.stl.textContent = fit(ST[st][1] + (word ? ' · ' + word : ''), u.n.w - 20, big ? 16 : 12.5);
+  const px = big ? 15 : 12;
+  (lines || []).forEach((t, i) => {
+    if (!u.subs[i]) return;
+    const hi = t.startsWith('!');
+    u.subs[i].textContent = fit(hi ? t.slice(1) : t, u.n.w - 20, px);
+    u.subs[i].setAttribute('class', 'sub' + (hi ? ' hi' : ''));
+  });
+  for (let i = (lines || []).length; i < u.subs.length; i++) u.subs[i].textContent = '';
+  u.tip.textContent = `${u.n.t}: ${ST[st][1]}${word ? ' - ' + word : ''}\n` + (tip || (lines || []).map(x => x.replace(/^!/, '')).join('\n'));
+}
+function flash(id){
+  const u = ui.nodes[id];
+  if (!u) return;
+  u.g.classList.remove('flash');
+  void u.g.getBBox();
+  u.g.classList.add('flash');
+  clearTimeout(u.ft);
+  u.ft = setTimeout(() => u.g.classList.remove('flash'), 3000);
+}
+// fwd/back: activity per second each way (0 = still); label shown in a bubble
+function setEdge(id, state, fwd, back, label, tip){
+  const e = ui.edges[id];
+  e.fwd = fwd || 0; e.back = back || 0;
+  e.g.setAttribute('class', 'edge ' + (state || '') + (e.fwd || e.back ? ' on' : ''));
+  const [a, , b, , dir] = EDGES[id];
+  e.tip.textContent = `${NODES[a].t} ⇄ ${NODES[b].t}` + (tip ? '\n' + tip : '');
+  const fin = dir === 'in';
+  e.dots.forEach((d, i) => d.setAttribute('class', 'dot ' + ((i < MAXDOTS) === fin ? 'in' : 'out')));
+  if (e.bubble){
+    if (label){
+      e.bubble.t.textContent = label;
+      const w = label.length * (big ? 8.6 : 7.2) + 16;
+      e.bubble.r.setAttribute('x', -w / 2); e.bubble.r.setAttribute('width', w);
+      e.bubble.g.setAttribute('visibility', 'visible');
+    } else e.bubble.g.setAttribute('visibility', 'hidden');
+  }
+}
+function setTile(k, text, val, st){
+  const t = ui.tiles[k];
+  t.v.textContent = text;
+  t.g.setAttribute('class', 'tile ' + (st || ''));
+  if (val != null){ hist[k].push(val); if (hist[k].length > 60) hist[k].shift(); }
+  const h = hist[k], max = Math.max(1, ...h);
+  t.pl.setAttribute('points', h.map((v, i) => `${8 + i * 102 / 59},${80 - 20 * v / max}`).join(' '));
+}
+
+// ---------- events ----------
+const logEl = $('log');
+const LOGICON = {ok:'✓', warn:'!', bad:'✕', '':'•'};
+function log(text, level, node){
+  const li = document.createElement('li');
+  li.className = (level || '') + ' new';
+  li.innerHTML = `<time>${new Date().toLocaleTimeString()}</time><b></b><span></span>`;
+  li.children[1].textContent = LOGICON[level || ''];
+  li.children[2].textContent = text;
+  if (node){ li.style.cursor = 'pointer'; li.onclick = () => flash(node); flash(node); }
+  logEl.prepend(li);
+  while (logEl.children.length > 200) logEl.lastChild.remove();
+}
+function clearLog(){ logEl.innerHTML = ''; }
+let prev = null;
+function diff(s){
+  if (!prev){ log('Live view started', 'ok'); return; }
+  const p = prev, ch = (a, b, txt, lvl, node) => { if (a !== b) log(txt, lvl, node); };
+  ch(p.net.eth.link, s.net.eth.link, s.net.eth.link ? 'Network cable connected' : 'Network cable unplugged or link lost', s.net.eth.link ? 'ok' : 'bad', 'eth0');
+  ch(p.net.wifi.connected, s.net.wifi.connected, s.net.wifi.connected ? 'Wi-Fi connected' : 'Wi-Fi disconnected', s.net.wifi.connected ? 'ok' : 'warn', 'wlan0');
+  for (const k in s.services) ch(p.services[k], s.services[k], `${k} service is now ${s.services[k]}`, s.services[k] === 'active' ? 'ok' : 'bad', k === 'cloudflared' ? 'cfd' : 'eth0');
+  ch(p.net.dut.reachable, s.net.dut.reachable, `DUT BMC ${s.net.dut.host} ${s.net.dut.reachable ? 'answers' : 'stopped answering'}`, s.net.dut.reachable ? 'ok' : 'warn', 'bmc');
+  s.uart.forEach((u, i) => ch(p.uart[i].connected, u.connected, `Serial port ${i} ${u.connected ? 'plugged in' : 'unplugged'}`, u.connected ? 'ok' : 'warn', 'uartdev'));
+  s.pwm.forEach((w, i) => { const a = p.pwm[i];
+    if (a.enable !== w.enable || a.freq !== w.freq || a.duty !== w.duty)
+      log(`PWM${i} ${w.enable ? `on: ${w.freq} Hz, ${w.duty}%` : 'off'}`, '', 'leds'); });
+  s.gpio_out.forEach((v, i) => ch(p.gpio_out[i], v, `Output OUT${i} switched ${v ? 'ON (high)' : 'off (low)'}`, '', 'leds'));
+  s.gpio_in.forEach((v, i) => ch(p.gpio_in[i], v, `Input IN${i} went ${v ? 'high' : 'low'}`, '', 'leds'));
+  ch(p.camera.present, s.camera.present, `Camera ${s.camera.present ? 'plugged in' : 'unplugged'}`, s.camera.present ? 'ok' : 'bad', 'camdev');
+  ch(p.camera.running, s.camera.running, `Camera ${s.camera.running ? 'started sending pictures' : 'stopped'}`, '', 'cam');
+  ch(p.agent.busy, s.agent.busy, `AI agent ${s.agent.busy ? 'started working' : 'finished'}`, '', 'agent');
+  if (s.agent.approvals > p.agent.approvals) log('AI agent is waiting for your approval', 'warn', 'agent');
+  if (s.agent.alerts > p.agent.alerts && s.agent.last_alert) log('Watch alert: ' + s.agent.last_alert.text, 'warn', 'agent');
+  ch(p.agent.auto_approve, s.agent.auto_approve, `AI agent approvals ${s.agent.auto_approve ? 'switched OFF (runs directly)' : 'switched on'}`, s.agent.auto_approve ? 'warn' : 'ok', 'agent');
+  ch(p.agent.shell_mode, s.agent.shell_mode, `AI agent shell set to "${s.agent.shell_mode}"`, '', 'agent');
+  s.i2c.buses.forEach((b, i) => { const a = p.i2c.buses[i];
+    if (b.errors > a.errors) log(`I2C bus ${i}: ${b.errors - a.errors} bus fault(s)`, 'bad', 'i2c');
+    if (b.nacks > a.nacks) log(`I2C bus ${i}: a device did not answer (${b.nacks - a.nacks}x)`, 'warn', 'i2c'); });
+  const ps = s.i2c.psu, pp = p.i2c.psu;
+  if (ps && pp){
+    ch(pp.present, ps.present, `PSU simulator ${ps.present ? 'answers again' : 'stopped answering'}`, ps.present ? 'ok' : 'bad', 'psu');
+    if (ps.present && pp.present){
+      ch(pp.status_word, ps.status_word, `PSU status changed ${hex4(pp.status_word)} → ${hex4(ps.status_word)}`, ps.status_word ? 'warn' : 'ok', 'psu');
+      ch(pp.vin, ps.vin, `PSU input voltage ${pp.vin} → ${ps.vin} V`, '', 'psu');
+      ch(pp.vout, ps.vout, `PSU output voltage ${pp.vout} → ${ps.vout} V`, '', 'psu');
+      ch(pp.pout, ps.pout, `PSU load ${pp.pout} → ${ps.pout} W`, '', 'psu');
+    }
+  }
+  for (const [k, name] of [['psu', 'PSU simulator'], ['eeprom', 'EEPROM']]){
+    const x = s.i2c[k], y = p.i2c[k];
+    if (x && y && x.glitches > y.glitches) log(`${name} missed a read, answered on the retry`, 'warn', k);
+  }
+  const lm = s.i2c.lm75, lp = p.i2c.lm75;
+  if (lm && lp && lm.addrs.join() !== lp.addrs.join())
+    log(lm.addrs.length ? `LM75 answers again (${lm.addrs.map(x => '0x' + x.toString(16).toUpperCase()).join(', ')})` : 'LM75 stopped answering', lm.addrs.length ? 'ok' : 'bad', 'lm75');
+  if (s.i2c.eeprom && p.i2c.eeprom) ch(p.i2c.eeprom.present, s.i2c.eeprom.present, `EEPROM ${s.i2c.eeprom.present ? 'answers again' : 'stopped answering'}`, s.i2c.eeprom.present ? 'ok' : 'bad', 'eeprom');
+  const hot = t => t >= 80 ? 2 : t >= 70 ? 1 : 0;
+  ch(hot(p.host.temp_c), hot(s.host.temp_c), `Pi chip temperature ${s.host.temp_c} °C`, ['ok', 'warn', 'bad'][hot(s.host.temp_c)]);
+  if ((s.host.throttled & 0xF) !== (p.host.throttled & 0xF)) log(s.host.throttled & 0xF ? 'Pi is slowing down (power or heat)' : 'Pi runs at full speed again', s.host.throttled & 0xF ? 'bad' : 'ok');
+}
+
+// ---------- render ----------
+let pwmState = [], ledBase = [];
+function render(s){
+  const dt = prev ? Math.max(0.2, s.time - prev.time) : 1;
+  const rate = (a, b) => prev ? Math.max(0, (a - b) / dt) : 0;
+  const h = s.host, n = s.net, a = s.agent, c = s.camera, i2c = s.i2c;
+
+  ui.boardTitle.textContent = `Raspberry Pi 5 · ${h.name} · running ${fmtDur(h.uptime_s)}`;
+  ui.svcLine.textContent = 'services: ' + Object.entries(s.services).map(([k, v]) => `${k} ${v}`).join(' · ')
+    + ` · disk ${h.disk_pct}% · tester service up ${fmtDur(h.service_uptime_s)}`;
+
+  const pe = prev && prev.net;
+  const ethIn = pe ? rate(n.eth.bytes[0], pe.eth.bytes[0]) : 0, ethOut = pe ? rate(n.eth.bytes[1], pe.eth.bytes[1]) : 0;
+  const wIn = pe ? rate(n.wifi.bytes[0], pe.wifi.bytes[0]) : 0, wOut = pe ? rate(n.wifi.bytes[1], pe.wifi.bytes[1]) : 0;
+  setTile('cpu', h.cpu_pct.toFixed(0) + ' %', h.cpu_pct, h.cpu_pct > 90 ? 'warn' : '');
+  setTile('temp', h.temp_c != null ? h.temp_c.toFixed(0) + ' °C' : '-', h.temp_c, h.temp_c >= 80 ? 'bad' : h.temp_c >= 70 ? 'warn' : '');
+  setTile('mem', h.mem_pct.toFixed(0) + ' %', h.mem_pct, h.mem_pct > 90 ? 'warn' : '');
+  setTile('load', h.load[0].toFixed(2), h.load[0], h.throttled & 0xF ? 'bad' : h.load[0] > h.cores ? 'warn' : '');
+  setTile('eth', fmtBytes(ethIn + ethOut), ethIn + ethOut);
+  setTile('wifi', fmtBytes(wIn + wOut), wIn + wOut);
+
+  // network side
+  setNode('lan', n.eth.link ? 'ok' : 'bad', n.eth.link ? 'cable connected' : 'no cable', ['browsers, curl, SSH', fmtBytes(ethIn + ethOut)]);
+  setNode('eth0', n.eth.link ? (ethIn + ethOut > 2000 ? 'act' : 'ok') : 'bad', n.eth.link ? 'link up' : 'link down', ['!' + n.eth.ip, 'ssh ' + (s.services.ssh || '?')]);
+  const wst = n.wifi.connected ? (n.wifi.rssi && n.wifi.rssi < -75 ? 'warn' : 'ok') : n.wifi.ssid ? 'bad' : 'idle';
+  setNode('wifiap', wst, n.wifi.connected ? (wst === 'warn' ? 'weak signal' : 'connected') : n.wifi.ssid ? 'not connected' : 'not set up',
+    ['!' + (n.wifi.ssid || '-'), n.wifi.connected ? `signal ${n.wifi.rssi} dBm` : '']);
+  setNode('wlan0', wst === 'ok' && wIn + wOut > 2000 ? 'act' : wst, n.wifi.connected ? 'connected' : 'not connected', ['!' + n.wifi.ip, fmtBytes(wIn + wOut)]);
+  const cfOk = s.services.cloudflared === 'active';
+  setNode('cf', cfOk ? 'ok' : 'bad', cfOk ? 'remote access on' : 'no remote access', ['pi-tester.dona-anna.com', 'login required']);
+  setNode('cfd', cfOk ? 'ok' : 'bad', cfOk ? 'tunnel up' : 'tunnel ' + s.services.cloudflared, ['outbound over Wi-Fi']);
+  const hasModel = !!a.profile;
+  setNode('llm', a.busy ? 'act' : hasModel ? 'ok' : 'idle', a.busy ? 'thinking' : hasModel ? 'ready' : 'no model set',
+    hasModel ? ['!' + (a.model || '?'), a.provider === 'anthropic' ? 'Claude API' : 'OpenAI-compatible API'] : []);
+  const ag = !hasModel ? 'warn' : a.approvals ? 'warn' : a.busy ? 'act' : 'ok';
+  setNode('agent', ag, !hasModel ? 'no model set' : a.approvals ? 'waiting for you' : a.busy ? 'working' : 'idle', [
+    '!' + (a.profile || 'no profile'),
+    a.auto_approve ? 'approvals OFF' : 'asks before changes',
+    'shell: ' + a.shell_mode,
+    `watches ${a.watches_on} · alerts ${a.alerts}`]);
+  const d = n.dut;
+  const dst = d.reachable == null ? 'idle' : d.reachable ? 'ok' : 'bad';
+  setNode('bmc', dst, d.host ? (d.reachable ? `answers in ${d.ms} ms` : 'not answering') : 'not set up', d.host ? ['!' + d.host + ':' + d.port] : []);
+  setNode('redfish', dst === 'bad' ? 'warn' : dst, d.host ? (d.reachable ? 'ready' : 'no DUT') : 'not set up', [d.host ? (d.port === 443 ? 'HTTPS' : 'HTTP') + ' to the BMC' : '']);
+
+  // core
+  const w = s.web || {};
+  setNode('web', ethIn + ethOut + wIn + wOut > 2000 ? 'act' : 'ok', 'serving pages', ['!REST API + live updates', `console pages ${w.console_pages ?? '-'}`,
+    `UART streams ${w.uart_streams ?? '-'}`, `camera viewers ${w.camera_viewers ?? '-'}`]);
+
+  const pwmOn = s.pwm.filter(p => p.enable).length;
+  setNode('io', pwmOn ? 'act' : 'ok', pwmOn ? `${pwmOn} PWM running` : 'ready', [`OUT ${s.gpio_out.join(' ')} · IN ${s.gpio_in.join(' ')}`,
+    s.pwm.map((p, i) => `PWM${i} ${p.enable ? p.freq + ' Hz' : 'off'}`).join(' · ')]);
+  const lit = [...s.gpio_out, ...s.gpio_in].filter(x => x).length + pwmOn;
+  setNode('leds', lit ? 'act' : 'ok', lit ? `${lit} lit` : 'all off');
+
+  const ops = i2c.buses.map((b, i) => prev ? rate(b.ops, prev.i2c.buses[i].ops) : 0);
+  const errUp = i2c.buses.some((b, i) => prev && b.errors > prev.i2c.buses[i].errors);
+  const nackUp = i2c.buses.some((b, i) => prev && b.nacks > prev.i2c.buses[i].nacks);
+  setNode('i2c', errUp ? 'bad' : nackUp ? 'warn' : ops[0] + ops[1] > 0 ? 'act' : 'ok',
+    errUp ? 'bus fault' : nackUp ? 'a device missed' : ops[0] + ops[1] > 0 ? 'transferring' : 'ready',
+    i2c.buses.map((b, i) => `bus ${i}: ${b.ops} transfers`).concat([`missed ${i2c.buses.map(b => b.nacks).join('/')}` + (i2c.buses.some(b => b.errors) ? ` · faults ${i2c.buses.map(b => b.errors).join('/')}` : '')]),
+    i2c.buses.map((b, i) => `bus ${i} = /dev/i2c-${b.dev}, ${b.speed / 1000} kHz: ${b.ops} transfers, ${b.nacks} not answered, ${b.errors} bus faults`).join('\n')
+      + '\n(the System page\'s own reads are not counted)');
+  const polled = $('i2cpoll').checked;
+  const ee = i2c.eeprom, ps = i2c.psu, lm = i2c.lm75;
+  setNode('eeprom', !polled || !ee ? 'idle' : ee.present ? 'ok' : 'bad', !polled ? 'not checked' : !ee ? '' : ee.present ? 'answers' : 'not answering',
+    ['bus 0 · 0x50' + (ee && ee.glitches ? ` · ${ee.glitches} retries` : '')]);
+  const hexs = a => a.map(x => '0x' + x.toString(16).toUpperCase()).join(',');
+  const lst = !polled || !lm ? 'idle' : !lm.addrs.length ? 'bad' : lm.recent < lm.recent_of || lm.addrs.length > 1 ? 'warn' : 'ok';
+  setNode('lm75', lst, !polled ? 'not checked' : !lm ? '' : lm.addrs.length ? `${lm.temp.toFixed(1)} °C` : 'not answering',
+    [lm ? `bus 0 · ${lm.addrs.length ? hexs(lm.addrs) : '0x48-4F'} · answered ${lm.recent}/${lm.recent_of}` : 'bus 0'],
+    lm ? `probed every second at 0x48-0x4F\nanswered ${lm.hits} of ${lm.polls} probes since the service started\n`
+       + `addresses seen: ${Object.entries(lm.seen).map(([k, v]) => k + ' x' + v).join(', ') || 'none'}\n`
+       + (lm.last_seen ? 'last answer ' + new Date(lm.last_seen * 1000).toLocaleTimeString() : 'never answered') : '');
+  const pst = !polled || !ps ? 'idle' : !ps.present ? 'bad' : (ps.status_word || ps.cml) ? 'warn' : 'ok';
+  setNode('psu', pst, !polled ? 'not checked' : !ps ? '' : !ps.present ? 'not answering' : ps.status_word ? 'fault bits set' : ps.cml ? 'command rejected' : 'no faults', [],
+    ps && ps.present ? `ESP32-C6 on bus 1 at 0x40\nSTATUS_WORD ${hex4(ps.status_word)}, STATUS_CML ${ps.cml.toString(16).toUpperCase().padStart(2, '0')}`
+      + (ps.glitches ? `\n${ps.glitches} reads needed a retry` : '') : 'ESP32-C6 on bus 1 at 0x40');
+  if (!polled) ui.lcd.forEach((t, i) => t.textContent = i ? '' : 'not checked');
+  else if (!ps || !ps.present) ui.lcd.forEach((t, i) => t.textContent = i ? '' : ps ? 'NO ANSWER' : '...');
+  else {
+    ui.lcd[0].textContent = `IN  ${ps.vin.toFixed(1).padStart(6)} V`;
+    ui.lcd[1].textContent = `OUT ${ps.vout.toFixed(2).padStart(6)} V ${ps.iout.toFixed(0).padStart(4)} A`;
+    ui.lcd[2].textContent = `LOAD ${ps.pout.toFixed(0).padStart(5)} W`;
+    ui.lcd[3].textContent = `STATUS ${hex4(ps.status_word)} CML ${ps.cml.toString(16).toUpperCase().padStart(2, '0')}`;
+  }
+
+  const rx = s.uart.map((u, i) => prev ? rate(u.rx, prev.uart[i].rx) : 0);
+  const tx = s.uart.map((u, i) => prev ? rate(u.tx, prev.uart[i].tx) : 0);
+  const rxs = rx.reduce((x, y) => x + y, 0), txs = tx.reduce((x, y) => x + y, 0);
+  const conn = s.uart.filter(u => u.connected).length;
+  setNode('uart', conn ? (rxs || txs ? 'act' : 'ok') : 'warn', conn ? (rxs || txs ? 'data moving' : 'quiet') : 'no ports',
+    [`${conn} of ${s.uart.length} ports connected`, ...s.uart.filter(u => u.connected).map(u => `port ${u.port}: ${u.baud} baud`).slice(0, 2)]);
+  setNode('uartdev', conn ? (rxs || txs ? 'act' : 'ok') : 'warn', conn ? `${conn} plugged in` : 'none plugged in', [],
+    s.uart.map((u, i) => `port ${i}: ${u.connected ? u.dev.split('/').pop() : 'absent'}`).join('\n'));
+  ui.ports.forEach((p, i) => {
+    const u = s.uart[i];
+    p.g.setAttribute('class', 'port' + (u.connected ? ' on' : '') + (rx[i] ? ' rx' : tx[i] ? ' tx' : ''));
+    p.t.textContent = u.connected ? (rx[i] ? 'in' : tx[i] ? 'out' : 'quiet') : 'none';
+  });
+
+  setNode('cam', !c.present ? 'bad' : c.running ? 'act' : 'ok', !c.present ? 'no camera' : c.running ? 'capturing' : 'stopped',
+    [c.running ? `${c.width}x${c.height}, ${c.viewers} viewer${c.viewers === 1 ? '' : 's'}` : 'starts when viewed', c.error || '']);
+  setNode('camdev', c.present ? (c.running ? 'act' : 'ok') : 'bad', c.present ? 'plugged in' : 'not plugged in', c.present ? ['!' + (c.name || 'UVC camera')] : []);
+
+  // links: forward/back rates and a bubble with the amount
+  setEdge('lan-eth0', n.eth.link ? 'ok' : 'bad', ethIn, ethOut, n.eth.link ? fmtBytes(ethIn + ethOut) : '', `in ${fmtBytes(ethIn)}, out ${fmtBytes(ethOut)}`);
+  setEdge('eth0-web', n.eth.link ? 'ok' : 'bad', ethIn, ethOut);
+  setEdge('wifiap-wlan0', wst === 'ok' ? 'ok' : wst === 'bad' ? 'bad' : '', wIn, wOut, n.wifi.connected ? fmtBytes(wIn + wOut) : '', `in ${fmtBytes(wIn)}, out ${fmtBytes(wOut)}`);
+  setEdge('wlan0-web', n.wifi.connected ? 'ok' : '', wIn, wOut);
+  setEdge('cf-cfd', cfOk ? 'ok' : 'bad', cfOk ? wIn : 0, cfOk ? wOut : 0);
+  setEdge('cfd-web', cfOk ? 'ok' : 'bad', cfOk ? wIn : 0, cfOk ? wOut : 0);
+  setEdge('llm-agent', hasModel ? 'ok' : '', a.busy ? 20 : 0, a.busy ? 20 : 0, a.busy ? 'thinking…' : '');
+  setEdge('web-agent', 'ok', a.busy ? 10 : 0, a.busy ? 10 : 0);
+  setEdge('bmc-redfish', dst === 'ok' ? 'ok' : dst === 'bad' ? 'bad' : '', 0, 0, '', d.host ? (d.reachable ? 'BMC answers' : 'BMC does not answer') : '');
+  setEdge('agent-redfish', d.host ? 'ok' : '', 0, 0);
+  const pwmRate = pwmOn ? Math.max(...s.pwm.filter(p => p.enable).map(p => p.freq)) : 0;
+  setEdge('web-io', 'ok', pwmRate, 0);
+  setEdge('io-leds', 'ok', pwmRate, 0);
+  setEdge('web-i2c', 'ok', ops[0] + ops[1], ops[0] + ops[1]);
+  setEdge('i2c-eeprom', polled && ee && !ee.present ? 'bad' : 'ok', ops[0], ops[0]);
+  setEdge('i2c-lm75', polled && lm && !lm.addrs.length ? 'bad' : 'ok', polled && lm && lm.addrs.length ? 1 : 0, polled && lm && lm.addrs.length ? 1 : 0);
+  setEdge('i2c-psu', polled && ps && !ps.present ? 'bad' : 'ok', ops[1], ops[1], ops[1] ? ops[1].toFixed(1) + ' /s' : '', 'I2C transfers per second on bus 1');
+  setEdge('web-uart', conn ? 'ok' : '', txs, rxs);
+  setEdge('uart-uartdev', conn ? 'ok' : 'bad', txs, rxs, rxs + txs ? fmtBytes(rxs + txs) : '', `received ${fmtBytes(rxs)}, sent ${fmtBytes(txs)}`);
+  setEdge('web-cam', c.present ? 'ok' : 'bad', 0, c.running ? 15 : 0);
+  setEdge('cam-camdev', c.present ? 'ok' : 'bad', 0, c.running ? 15 : 0, c.running ? 'video' : '');
+
+  pwmState = s.pwm;
+  ledBase = [s.gpio_out[0], s.gpio_out[1], s.gpio_in[0], s.gpio_in[1]];
+  summary();
+}
+
+// one sentence for the whole tester, with buttons that point at the problem blocks
+function summary(){
+  const bad = [], warn = [];
+  for (const id in ui.nodes){
+    const u = ui.nodes[id];
+    if (u.st === 'bad') bad.push(id); else if (u.st === 'warn') warn.push(id);
+  }
+  const el2 = $('summary'), items = $('sumItems');
+  el2.className = bad.length ? 'bad' : warn.length ? 'warn' : 'ok';
+  el2.querySelector('.ic').textContent = bad.length ? '✕' : warn.length ? '!' : '✓';
+  $('sumText').textContent = bad.length ? `${bad.length} not working${warn.length ? `, ${warn.length} to check` : ''}:`
+    : warn.length ? `Working. ${warn.length} thing${warn.length > 1 ? 's' : ''} to check:` : 'Everything is working.';
+  const key = bad.concat(warn).map(id => id + ui.nodes[id].reason).join('|');
+  if (items.dataset.key === key) return;
+  items.dataset.key = key;
+  items.innerHTML = '';
+  for (const id of bad.concat(warn)){
+    const b = document.createElement('button');
+    b.className = bad.includes(id) ? 'bad' : 'warn';
+    b.textContent = `${ui.nodes[id].n.t}: ${ui.nodes[id].reason}`;
+    b.title = 'Show it on the diagram';
+    b.onclick = () => flash(id);
+    items.appendChild(b);
+  }
+}
+
+// ---------- animation: moving dots and blinking PWM LEDs ----------
+let lastT = 0;
+function frame(t){
+  const dt = lastT ? Math.min(0.1, (t - lastT) / 1000) : 0;
+  lastT = t;
+  if (ui && !svg.classList.contains('stale')){
+    for (const id in ui.edges){
+      const e = ui.edges[id];
+      for (const [k, r] of [[0, e.fwd], [1, e.back]]){
+        // more data: more dots and faster ones
+        const n = r > 0 ? Math.min(MAXDOTS, 2 + Math.floor(Math.log10(1 + r))) : 0;
+        e.phase[k] += REDUCED ? 0 : Math.min(320, 55 + 45 * Math.log10(1 + r)) * dt;
+        for (let i = 0; i < MAXDOTS; i++){
+          const d = e.dots[k * MAXDOTS + i];
+          if (i >= n){ d.setAttribute('visibility', 'hidden'); continue; }
+          // the two directions are offset by half a gap so their dots don't sit on each other
+          const pos = (e.phase[k] + (i + k * 0.5) * e.len / n) % e.len;
+          const pt = e.base.getPointAtLength(k ? e.len - pos : pos);
+          d.setAttribute('cx', pt.x.toFixed(1)); d.setAttribute('cy', pt.y.toFixed(1));
+          d.setAttribute('visibility', 'visible');
+        }
+      }
+    }
+  }
+  if (ui && ui.leds){
+    ledBase.forEach((v, i) => setLed(i, v ? 1 : 0));
+    pwmState.forEach((p, i) => {
+      let on = 0;
+      if (p.enable && p.duty > 0){
+        // slow PWM blinks for real; fast PWM shows its duty as brightness
+        on = p.freq <= 15 ? ((t / 1000 * p.freq) % 1 < p.duty / 100 ? 1 : 0) : Math.max(0.2, p.duty / 100);
+      }
+      setLed(4 + i, on);
+    });
+  }
+  requestAnimationFrame(frame);
+}
+function setLed(i, on){
+  const l = ui.leds[i];
+  l.c.setAttribute('fill', on ? ui.ledColor[i] : 'var(--bg)');
+  l.c.setAttribute('fill-opacity', on || 1);
+  l.c.style.filter = on ? `drop-shadow(0 0 ${6 * on}px ${ui.ledColor[i]})` : '';
+  l.t.setAttribute('class', 'ledlbl' + (on ? ' lit' : ''));
+}
+
+// ---------- polling ----------
+let paused = false, lastOk = 0, timer = null;
+function togglePause(){
+  paused = !paused;
+  $('pause').textContent = paused ? 'Resume' : 'Pause';
+  $('pause').classList.toggle('on', paused);
+  if (!paused) poll();
+}
+function toggleSize(){
+  big = !big;
+  try { localStorage.setItem('sysBig', big ? '1' : '0'); } catch (e) {}
+  build();
+  if (prev){ const p = prev; prev = null; render(p); prev = p; }
+}
+try { $('i2cpoll').checked = localStorage.getItem('sysI2c') !== '0'; } catch (e) {}
+$('i2cpoll').onchange = () => { try { localStorage.setItem('sysI2c', $('i2cpoll').checked ? '1' : '0'); } catch (e) {} };
+
+async function poll(){
+  clearTimeout(timer);
+  if (paused) return;
+  try {
+    const ctl = new AbortController();
+    const to = setTimeout(() => ctl.abort(), 4000);
+    const r = await fetch('/api/system?i2c=' + ($('i2cpoll').checked ? 1 : 0), {signal:ctl.signal, cache:'no-store'});
+    clearTimeout(to);
+    if (!r.ok) throw new Error(r.status);
+    const s = await r.json();
+    diff(s);
+    render(s);
+    prev = s;
+    lastOk = Date.now();
+    svg.classList.remove('stale');
+  } catch (e) {
+    if (lastOk && Date.now() - lastOk > 3000){
+      if (!svg.classList.contains('stale')) log('Lost contact with the tester', 'bad');
+      svg.classList.add('stale');
+      $('summary').className = 'lost';
+      $('summary').querySelector('.ic').textContent = '✕';
+      $('sumText').textContent = 'No answer from the tester. Retrying…';
+      $('sumItems').innerHTML = ''; $('sumItems').dataset.key = '';
+    }
+  }
+  timer = setTimeout(poll, 1000);
+}
+setInterval(() => {
+  $('age').textContent = lastOk ? (paused ? 'paused' : `updated ${Math.round((Date.now() - lastOk) / 1000)} s ago`) : '';
+}, 500);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
+
+build();
+poll();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

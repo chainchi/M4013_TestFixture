@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bench Agent</title>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--fg:#1c1f24;--mut:#6b7280;--line:#dde0e5;--acc:#2563eb;--ok:#15803d;--bad:#b91c1c;--warn:#b45309;--me:#dbe7ff;--code:#eef0f3}
+@media (prefers-color-scheme:dark){:root{--bg:#14161a;--card:#1d2026;--fg:#e6e8eb;--mut:#9aa1ab;--line:#2c3038;--acc:#5b8cff;--ok:#4ade80;--bad:#f87171;--warn:#fbbf24;--me:#23314f;--code:#14161a}}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;display:flex;flex-direction:column;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,Segoe UI,Arial,sans-serif}
+header{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 16px;background:var(--card);border-bottom:1px solid var(--line)}
+header h1{font-size:16px;margin:0}
+.mut{color:var(--mut)}.on{color:var(--ok)}.off{color:var(--bad)}
+input,select,textarea,button{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:5px 8px}
+button{cursor:pointer;background:var(--acc);color:#fff;border-color:var(--acc)}
+button.sec{background:transparent;color:var(--fg);border-color:var(--line)}
+button.bad{background:var(--bad);border-color:var(--bad)}
+button.q{padding:2px 8px;font-size:12px}
+button.auto{background:var(--bad);border-color:var(--bad);color:#fff}
+a.btn{color:var(--fg);text-decoration:none;border:1px solid var(--line);border-radius:6px;padding:4px 10px}
+main{position:relative;flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) var(--side,300px);gap:10px;padding:10px 16px}
+section{background:var(--card);border:1px solid var(--line);border-radius:8px;display:flex;flex-direction:column;min-height:0}
+h2{font-size:13px;margin:0;padding:8px 12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);border-bottom:1px solid var(--line)}
+#log{flex:1;min-height:0;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:8px}
+.msg{max-width:85%;padding:8px 12px;border-radius:10px;white-space:pre-wrap;word-wrap:break-word}
+.msg.user{align-self:flex-end;background:var(--me)}
+.msg.bot{align-self:flex-start;background:var(--bg);border:1px solid var(--line)}
+.msg.watch{align-self:stretch;max-width:none;background:transparent;border:1px dashed var(--warn);color:var(--warn);font-size:12px}
+.msg .who{font-size:11px;color:var(--mut);margin-bottom:2px}
+.msg code{background:var(--code);padding:0 4px;border-radius:4px;font:12px Consolas,Menlo,monospace}
+.msg pre{background:var(--code);padding:8px;border-radius:6px;overflow:auto;font:12px/1.35 Consolas,Menlo,monospace;margin:4px 0;white-space:pre}
+details.tool{align-self:flex-start;max-width:85%;font-size:12px;color:var(--mut);border-left:3px solid var(--line);padding:2px 8px}
+details.tool summary{cursor:pointer}
+details.tool.err{border-left-color:var(--bad)}
+details.tool pre{white-space:pre-wrap;word-break:break-all;font:11px/1.35 Consolas,Menlo,monospace;margin:4px 0;max-height:240px;overflow:auto}
+details.tool img{max-width:320px;border-radius:6px;display:block;margin-top:4px}
+.note{align-self:center;font-size:12px;color:var(--mut)}
+.note.error{color:var(--bad)}.note.warn{color:var(--warn)}
+.appr{align-self:stretch;border:2px solid var(--warn);border-radius:8px;padding:8px 12px;background:var(--card)}
+.appr pre{margin:6px 0;font:12px Consolas,Menlo,monospace;white-space:pre-wrap}
+.appr .src{font-size:11px;color:var(--mut)}
+#typing{font-size:12px;color:var(--mut);padding:0 12px 4px;min-height:18px}
+.inbar{display:flex;gap:6px;padding:8px;border-top:1px solid var(--line)}
+.inbar textarea{flex:1;resize:none;height:56px}
+.side{gap:10px;background:transparent;border:0}
+.side section{flex:1 1 0}
+#wSec{flex:var(--wf,1) 1 0}#aSec{flex:var(--af,1) 1 0}
+.gutter{position:absolute;z-index:5;border-radius:3px;touch-action:none}
+.gutter.v{cursor:col-resize}.gutter.h{cursor:row-resize}
+.gutter:hover,.gutter.drag{background:var(--acc);opacity:.45}
+body.dragging{user-select:none}
+.list{overflow:auto;padding:8px 12px;font-size:12px;display:flex;flex-direction:column;gap:6px}
+.w{border:1px solid var(--line);border-radius:6px;padding:6px 8px}
+.w .t{display:flex;gap:6px;align-items:center}
+.w .t b{flex:1}
+.a{border-left:3px solid var(--warn);padding-left:6px}
+dialog{border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--fg);width:min(520px,94vw)}
+dialog .row{display:flex;align-items:center;gap:8px;margin:6px 0}
+dialog .row label{min-width:80px;color:var(--mut)}
+dialog .row input,dialog .row select{flex:1}
+#cfgMsg{font-size:12px;min-height:18px}
+@media (max-width:760px){.gutter{display:none}main{grid-template-columns:1fr;grid-template-rows:minmax(420px,1fr) auto}body{height:auto}html{height:auto}}
+</style>
+</head>
+<body>
+<header>
+  <a class="btn" href="/">&larr; Test host</a>
+  <h1>Bench agent</h1>
+  <span id="link" class="off" style="font-size:12px">offline</span>
+  <span style="flex:1"></span>
+  <label class="mut" for="prof">Model</label>
+  <select id="prof" onchange="setActive(this.value)"></select>
+  <button class="sec" id="autoB" onclick="toggleAuto()" title="Whether actions that change the DUT wait for Approve / Deny">Approvals: on</button>
+  <button class="sec" id="shellB" onclick="cycleShell()" title="Linux shell commands: ask before each one / run directly / not allowed">Shell: ask</button>
+  <button class="sec" onclick="openCfg()">Model settings</button>
+  <button class="sec" onclick="newChat()">New chat</button>
+</header>
+<main>
+  <section>
+    <div id="log"></div>
+    <div id="typing"></div>
+    <div class="inbar">
+      <textarea id="in" placeholder="Ask the agent, e.g. &quot;read the PSU's VIN and VOUT&quot; or &quot;tell me if UART 0 prints PANIC&quot;  (Enter sends, Shift+Enter new line)"></textarea>
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <button onclick="sendMsg()">Send</button>
+        <button class="sec" id="stopB" onclick="wsSend({type:'stop'})" disabled>Stop</button>
+      </div>
+    </div>
+  </section>
+  <div class="side" id="side" style="display:flex;flex-direction:column;min-height:0">
+    <section id="wSec"><h2>Watch rules</h2><div class="list" id="watches"></div></section>
+    <section id="aSec"><h2>Alerts</h2><div class="list" id="alerts"></div></section>
+  </div>
+</main>
+
+<dialog id="cfg">
+  <h3 style="margin:4px 0 8px">Model profiles</h3>
+  <div class="row"><label>Profile</label><select id="cName" onchange="fillCfg(this.value)"></select></div>
+  <div class="row"><label>Name</label><input id="fName" placeholder="e.g. Claude Opus"></div>
+  <div class="row"><label>Provider</label><select id="fProv" onchange="provHint()">
+    <option value="anthropic">Anthropic (Claude)</option><option value="openai">OpenAI-compatible</option></select></div>
+  <div class="row"><label>Address</label><input id="fUrl" class="mono"></div>
+  <div class="row"><label>API key</label><input id="fKey" type="password" autocomplete="off"></div>
+  <div class="row"><label>Model</label><input id="fModel" list="models"></div>
+  <datalist id="models"></datalist>
+  <div class="row"><label>Effort</label><select id="fEff">
+    <option value="">model default</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option><option>max</option></select></div>
+  <div id="cfgMsg" class="mut"></div>
+  <div class="row" style="justify-content:flex-end">
+    <button class="sec bad" style="color:#fff" onclick="delProf()">Delete</button>
+    <span style="flex:1"></span>
+    <button class="sec" onclick="testProf()">Test</button>
+    <button onclick="saveProf()">Save</button>
+    <button class="sec" onclick="$('cfg').close()">Close</button>
+  </div>
+</dialog>
+
+<script>
+const $=id=>document.getElementById(id);
+let ws, cfg={profiles:[],active:''}, results={}, busy=false;
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+/* tiny markdown: ```code```, `code`, **bold** */
+function md(t){
+  return esc(t).replace(/```[a-z]*\n?([\s\S]*?)```/g,(_,c)=>`<pre>${c}</pre>`)
+    .replace(/`([^`\n]+)`/g,'<code>$1</code>').replace(/\*\*([^*\n]+)\*\*/g,'<b>$1</b>');
+}
+function atBottom(){const l=$('log');return l.scrollTop+l.clientHeight>=l.scrollHeight-40;}
+function add(el){const stick=atBottom();$('log').appendChild(el);if(stick)$('log').scrollTop=1e9;return el;}
+function div(cls,html){const d=document.createElement('div');d.className=cls;d.innerHTML=html;return d;}
+
+function render(m){
+  const blocks=Array.isArray(m.content)?m.content:[{type:'text',text:m.content}];
+  if(m.role==='user'){
+    for(const b of blocks){
+      if(b.type==='text') add(div(b.text.startsWith('[watch]')?'msg watch':'msg user',md(b.text)));
+      else if(b.type==='tool_result') showResult(b);
+    }
+    return;
+  }
+  for(const b of blocks){
+    if(b.type==='text'&&b.text.trim()) add(div('msg bot',`<div class="who">${esc(m.model||'agent')}</div>${md(b.text)}`));
+    else if(b.type==='tool_use'){
+      const d=document.createElement('details'); d.className='tool'; d.id='tu_'+b.id;
+      d.innerHTML=`<summary>&#128295; ${esc(b.name)} ${esc(JSON.stringify(b.input||{}))}</summary><div class="res mut">running…</div>`;
+      add(d);
+    }
+  }
+}
+function showResult(b){
+  const d=$('tu_'+b.tool_use_id); if(!d) return;
+  let txt='', imgs='';
+  const c=Array.isArray(b.content)?b.content:[{type:'text',text:b.content}];
+  for(const x of c){ if(x.type==='text') txt+=x.text; else if(x.type==='image') imgs+=`<img src="data:${x.source.media_type};base64,${x.source.data}">`; }
+  if(b.is_error) d.classList.add('err');
+  d.querySelector('.res').outerHTML=`<pre>${esc(txt)}</pre>${imgs}`;
+  if(imgs) d.open=true;
+}
+function note(t,level){add(div('note '+(level||''),esc(t)));}
+function approval(a){
+  const el=div('appr',`<div><b>Approve?</b> the agent wants to run <b>${esc(a.tool)}</b>
+    <span class="src">${a.source==='watch'?'(from a watch rule)':''} ${esc(a.time)}</span></div>
+    <pre>${esc(a.tool==='shell'?'$ '+a.input.command:JSON.stringify(a.input,null,1))}</pre>
+    <button onclick="answer('${a.id}',true)">Approve</button> <button class="sec" onclick="answer('${a.id}',false)">Deny</button>`);
+  el.id='ap_'+a.id; add(el); $('log').scrollTop=1e9;
+}
+function answer(id,ok){wsSend({type:'approve',id,ok});}
+function setBusy(b){busy=b;$('stopB').disabled=!b;$('typing').textContent=b?'agent is working…':'';}
+function watches(list){
+  $('watches').innerHTML=list.length?list.map(w=>`<div class="w"><div class="t"><b>#${w.id} ${esc(w.description)}</b>
+    <input type="checkbox" title="enabled" ${w.enabled!==false?'checked':''} onchange="watchCmd({enable:${w.id},on:this.checked})">
+    <button class="sec q" onclick="watchCmd({remove:${w.id}})">&times;</button></div>
+    <div class="mut">${esc(w.kind)} ${esc(w.kind==='uart_match'?`UART ${w.port} /${w.pattern}/`:w.kind==='gpio_in'?`IN${w.ch} = ${w.level}`:`bus ${w.bus} 0x${(w.addr|0).toString(16)} every ${w.interval_s}s ${w.condition}`)}
+    · ${w.investigate?'agent investigates':'alert only'} · last: ${esc(w.last_fired||'never')}</div></div>`).join('')
+    :'<span class="mut">None yet. Ask the agent, e.g. "watch UART 0 for PANIC".</span>';
+}
+function alertAdd(a,top){const l=$('alerts');if(l.querySelector('.mut'))l.innerHTML='';
+  const d=div('a',`<span class="mut">${esc(a.time)}</span><br>${esc(a.text)}`);top?l.prepend(d):l.appendChild(d);}
+async function watchCmd(b){await fetch('/api/agent/watches',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});}
+
+function profSelect(){
+  const opts=cfg.profiles.map(p=>`<option ${p.name===cfg.active?'selected':''}>${esc(p.name)}</option>`).join('');
+  $('prof').innerHTML=opts||'<option value="">(none: add one)</option>';
+  $('cName').innerHTML=opts+'<option value="">+ new profile</option>';
+  const a=$('autoB'); a.className=cfg.auto_approve?'auto':'sec';
+  a.textContent=cfg.auto_approve?'Approvals: off (runs directly)':'Approvals: on';
+  const sm=cfg.shell_mode||'ask', sb=$('shellB');
+  sb.className=sm==='auto'?'auto':'sec'; sb.textContent={ask:'Shell: ask',auto:'Shell: auto (runs directly)',off:'Shell: off'}[sm];
+}
+const SHELL_NEXT={ask:'auto',auto:'off',off:'ask'};
+async function cycleShell(){ await post('/api/agent/config',{shell_mode:SHELL_NEXT[cfg.shell_mode||'ask']}); }
+/* off = the agent changes GPIO/PWM/I2C/UART/Redfish without asking */
+async function toggleAuto(){ await post('/api/agent/config',{auto_approve:!cfg.auto_approve}); }
+function connect(){
+  ws=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws/agent`);
+  ws.onopen=()=>{$('link').textContent='connected';$('link').className='on';};
+  ws.onclose=()=>{$('link').textContent='offline';$('link').className='off';setTimeout(connect,2000);};
+  ws.onmessage=e=>{
+    const ev=JSON.parse(e.data);
+    switch(ev.type){
+      case 'init':
+        $('log').innerHTML=''; ev.history.forEach(render); ev.approvals.forEach(approval);
+        setBusy(ev.busy); watches(ev.watches); cfg=ev.cfg; profSelect();
+        $('alerts').innerHTML='<span class="mut">No alerts.</span>'; ev.alerts.forEach(a=>alertAdd(a,true));
+        if(!cfg.profiles.length) note('No model yet: click "Model settings" to add a Claude or OpenAI-compatible profile.','warn');
+        $('log').scrollTop=1e9; break;
+      case 'message': render(ev.message); break;
+      case 'busy': setBusy(ev.busy); break;
+      case 'note': note(ev.text,ev.level); break;
+      case 'approval': approval(ev); break;
+      case 'approval_done': {const a=$('ap_'+ev.id); if(a) a.remove(); break;}
+      case 'alert': alertAdd(ev,true); break;
+      case 'watches': watches(ev.watches); break;
+      case 'cfg': cfg=ev.cfg; profSelect(); break;
+    }
+  };
+}
+function wsSend(o){ if(ws&&ws.readyState===1) ws.send(JSON.stringify(o)); else note('not connected to the Pi','error'); }
+function sendMsg(){const t=$('in').value.trim(); if(!t) return; wsSend({type:'user',text:t}); $('in').value='';}
+$('in').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMsg();}});
+async function newChat(){ await fetch('/api/agent/reset',{method:'POST'}); }
+
+/* ---------- model profiles ---------- */
+const HINT={anthropic:{url:'(empty = api.anthropic.com)',models:['claude-opus-5-5','claude-sonnet-5-5','claude-haiku-5-5','claude-fable-5-1']},
+  openai:{url:'e.g. https://api.openai.com/v1 or http://<pc>:11434/v1 (Ollama)',models:[]}};
+function provHint(){const h=HINT[$('fProv').value];$('fUrl').placeholder=h.url;
+  $('models').innerHTML=h.models.map(m=>`<option value="${m}">`).join('');}
+function fillCfg(name){
+  const p=cfg.profiles.find(x=>x.name===name)||{name:'',provider:'anthropic',base_url:'',model:'claude-opus-5-5',effort:''};
+  $('cName').value=p.name; $('fName').value=p.name; $('fProv').value=p.provider; $('fUrl').value=p.base_url||'';
+  $('fModel').value=p.model||''; $('fEff').value=p.effort||''; $('fKey').value='';
+  $('fKey').placeholder=p.key_set?`stored ${p.key_hint||''} (leave empty to keep)`:'paste the API key';
+  $('cfgMsg').textContent=''; provHint();
+}
+function openCfg(){profSelect(); fillCfg(cfg.active||''); $('cfg').showModal();}
+async function post(path,body){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return r.json();}
+async function saveProf(){
+  const name=$('fName').value.trim();
+  const r=await post('/api/agent/config',{profile:{name,provider:$('fProv').value,base_url:$('fUrl').value,
+    api_key:$('fKey').value,model:$('fModel').value,effort:$('fEff').value}});
+  $('cfgMsg').textContent=r.ok?'saved':r.error; $('cfgMsg').className=r.ok?'on':'off';
+  if(r.ok){$('fKey').value=''; setTimeout(()=>fillCfg(name),300);}
+}
+async function delProf(){ const n=$('cName').value; if(!n) return; await post('/api/agent/config',{delete:n}); setTimeout(()=>fillCfg(cfg.active),300); }
+async function testProf(){
+  const n=$('cName').value||$('fName').value.trim(); $('cfgMsg').textContent='testing… (save first)'; $('cfgMsg').className='mut';
+  const r=await post('/api/agent/test',{name:n});
+  $('cfgMsg').textContent=r.ok?`OK in ${r.ms} ms: "${r.reply}"`:r.error; $('cfgMsg').className=r.ok?'on':'off';
+}
+async function setActive(n){ if(n) await post('/api/agent/config',{active:n}); }
+/* ---------- drag the gaps to resize: chat | side panel, watch rules / alerts ---------- */
+const MAIN=document.querySelector('main');
+let lay={}; try{lay=JSON.parse(localStorage.getItem('agentLayout')||'{}')||{};}catch(e){}
+function applyLayout(){
+  MAIN.style.setProperty('--side',(lay.side||300)+'px');
+  $('side').style.setProperty('--wf',lay.wf||1); $('side').style.setProperty('--af',lay.af||1);
+  try{localStorage.setItem('agentLayout',JSON.stringify(lay));}catch(e){}
+  placeGutters();
+}
+function gutter(kind,keys,start,move){
+  const g=document.createElement('div'); g.className='gutter '+kind; MAIN.appendChild(g);
+  g.addEventListener('pointerdown',e=>{
+    e.preventDefault(); g.setPointerCapture(e.pointerId); g.classList.add('drag'); document.body.classList.add('dragging');
+    const s0=start(), x0=e.clientX, y0=e.clientY;
+    const mv=ev=>{move(s0,ev.clientX-x0,ev.clientY-y0); applyLayout();};
+    const up=()=>{g.removeEventListener('pointermove',mv); g.classList.remove('drag'); document.body.classList.remove('dragging');};
+    g.addEventListener('pointermove',mv); g.addEventListener('pointerup',up,{once:true}); g.addEventListener('pointercancel',up,{once:true});
+  });
+  g.addEventListener('dblclick',()=>{keys.forEach(k=>delete lay[k]); applyLayout();});
+  return g;
+}
+const gV=gutter('v',['side'],()=>$('side').getBoundingClientRect().width,
+  (w,dx)=>{lay.side=Math.round(Math.max(200,Math.min(MAIN.clientWidth-360,w-dx)));});
+const gH=gutter('h',['wf','af'],()=>[$('wSec').getBoundingClientRect().height,$('aSec').getBoundingClientRect().height],
+  (h,dx,dy)=>{dy=Math.max(80-h[0],Math.min(h[1]-80,dy)); lay.wf=Math.round(h[0]+dy); lay.af=Math.round(h[1]-dy);});
+function placeGutters(){
+  const m=MAIN.getBoundingClientRect(), c=MAIN.firstElementChild.getBoundingClientRect(),
+    s=$('side').getBoundingClientRect(), w=$('wSec').getBoundingClientRect(), a=$('aSec').getBoundingClientRect();
+  const put=(g,x,y,wd,ht)=>Object.assign(g.style,{left:x-m.left+'px',top:y-m.top+'px',width:wd+'px',height:ht+'px'});
+  put(gV,c.right,c.top,s.left-c.right,c.height);
+  put(gH,w.left,w.bottom,w.width,a.top-w.bottom);
+}
+new ResizeObserver(placeGutters).observe(MAIN);
+applyLayout();
+connect();
+</script>
+</body>
+</html>

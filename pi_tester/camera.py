@@ -115,6 +115,7 @@ class Camera:
         self.dev = self.name = self.fmt = None
         self.error = None
         self.viewers = 0
+        self._rates = []               # fps each viewer asked for
         self._last_view = 0.0
         self._thread = None
         self._loop = None
@@ -141,12 +142,14 @@ class Camera:
             self._thread = threading.Thread(target=self._run, name="camera", daemon=True)
             self._thread.start()
 
-    def acquire(self):
+    def acquire(self, fps=30):
         self.viewers += 1
+        self._rates.append(fps)
         self.start()
 
-    def release(self):
+    def release(self, fps=30):
         self.viewers -= 1
+        self._rates.remove(fps)
         self._last_view = time.monotonic()
 
     async def next_frame(self, seq, timeout=5.0):
@@ -207,6 +210,7 @@ class Camera:
                 _ioctl(fd, VIDIOC_QBUF, q)
             _ioctl(fd, VIDIOC_STREAMON, struct.pack("<I", BUF_TYPE_CAPTURE))
             print(f"camera: {self.name} {self.width}x{self.height} @ {self.fps} fps on {self.dev}", flush=True)
+            last = 0.0
             while not self._idle():
                 if not select.select([fd], [], [], 2.0)[0]:
                     continue
@@ -222,8 +226,11 @@ class Camera:
                 data = maps[i][:used]
                 _ioctl(fd, VIDIOC_QBUF, q)
                 if self.fmt == YUYV:
-                    if used < self.width * self.height * 2:
+                    # encoding costs CPU: only as often as the fastest viewer wants
+                    now = time.monotonic()
+                    if used < self.width * self.height * 2 or now - last < 0.9 / max(self._rates or [30]):
                         continue
+                    last = now
                     jpeg = _yuyv_to_jpeg(data, self.width, self.height)
                 else:
                     jpeg = data

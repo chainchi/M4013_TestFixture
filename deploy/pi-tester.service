@@ -4,7 +4,8 @@ After=network.target
 
 [Service]
 # root: GPIO, PWM sysfs, /dev/i2c-*, port 80 and writing netplan
-ExecStart=/usr/bin/python3 -m pi_tester
+# venv with the anthropic SDK, see install.sh
+ExecStart=/opt/pi-tester-venv/bin/python -m pi_tester
 WorkingDirectory=/opt/pi-tester
 Restart=always
 RestartSec=2

@@ -5,7 +5,13 @@ set -e
 cd "$(dirname "$0")/.."
 
 apt-get install -y -qq -o DPkg::Lock::Timeout=600 \
-    python3-aiohttp python3-libgpiod python3-smbus2 python3-serial python3-pil python3-numpy gpiod i2c-tools avahi-daemon iw
+    python3-aiohttp python3-libgpiod python3-smbus2 python3-serial python3-pil python3-numpy python3-venv     gpiod i2c-tools avahi-daemon iw
+
+# Venv for the agent's Claude SDK (Ubuntu's python3-anthropic is too old); it
+# still sees the apt packages above
+V=/opt/pi-tester-venv
+[ -x $V/bin/python ] || python3 -m venv --system-site-packages $V
+$V/bin/pip install -q -U anthropic
 
 # Second I2C bus (GPIO 4/5) and 2 hardware PWM channels (GPIO 18/19); I2C bus 0 is i2c_arm
 C=/boot/firmware/config.txt

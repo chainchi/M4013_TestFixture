@@ -14,6 +14,10 @@ BUS_COUNT = len(config.I2C_BUSES)
 _NACK_ERRNOS = {errno.ENXIO, errno.EREMOTEIO, errno.EIO}
 
 _locks = [threading.Lock() for _ in range(BUS_COUNT)]
+# transfers, NACKs and bus faults per bus, for the system page
+ops = [0] * BUS_COUNT
+nacks = [0] * BUS_COUNT
+errors = [0] * BUS_COUNT
 
 
 class Nack(Exception):
@@ -59,6 +63,7 @@ def scan(bus):
     _check_bus(bus)
     found = []
     with _locks[bus]:
+        ops[bus] += 1
         for a in range(0x08, 0x78):
             acks = 0
             try:
@@ -90,10 +95,22 @@ def line_levels(bus):
     return tuple(levels)
 
 
-def xfer(bus, addr, w, rlen):
-    """Writes w, then (repeated start) reads rlen bytes. Raises Nack."""
+def xfer(bus, addr, w, rlen, count=True):
+    """Writes w, then (repeated start) reads rlen bytes. Raises Nack.
+    count=False keeps the system page's own polls out of the counters."""
     _check_bus(bus)
     if not 0 <= addr <= 0x7f or (not w and not rlen):
         raise ValueError("bad address or empty transfer")
     with _locks[bus]:
-        return _rdwr(bus, addr, bytes(w), rlen)
+        if count:
+            ops[bus] += 1
+        try:
+            return _rdwr(bus, addr, bytes(w), rlen)
+        except Nack:
+            if count:
+                nacks[bus] += 1
+            raise
+        except OSError:
+            if count:
+                errors[bus] += 1
+            raise

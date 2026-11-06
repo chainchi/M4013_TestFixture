@@ -32,6 +32,15 @@ tester speaks to the DUT (see `/api/redfish` below).
 | GET  | `/api/camera/stream[?fps=5]` | – | Live MJPEG video (`<img src=...>`), optional rate cap 1–30; max 4 at once |
 | GET  | `/api/camera/snapshot` | – | One JPEG frame (`curl -o pic.jpg`) |
 | GET  | `/camera` | – | Full-page camera view |
+| GET  | `/system` | – | Live system diagram page |
+| GET  | `/api/system[?i2c=0]` | – | Everything the system page shows: `host` (CPU, temp, memory, load, throttled), `services`, `net` (eth/wifi bytes, DUT BMC reachable), `i2c` (per-bus transfer/NACK/fault counters, PSU readings, EEPROM present; `i2c=0` skips the device reads), `gpio_out`, `gpio_in`, `pwm`, `uart` (with RX/TX byte totals), `camera`, `agent`, `web` |
+| GET  | `/agent` | – | AI agent chat page |
+| POST | `/api/agent/message` | `{"text":"..."}` (`"wait":false` to only queue) | Ask the agent; returns `{"reply":"..."}` when the turn ends |
+| GET/POST | `/api/agent/config` | `{"profile":{"name","provider":"anthropic"\|"openai","base_url","api_key","model","effort"}}`, `{"active":name}`, `{"delete":name}` | Model profiles (GET never returns keys) |
+| POST | `/api/agent/test` | `{"name":"..."}` | One-line request to check a profile |
+| POST | `/api/agent/reset` / `/api/agent/stop` | – | New chat / stop the running turn |
+| GET/POST | `/api/agent/watches` | `{"remove":id}`, `{"enable":id,"on":false}` | Watch rules and recent alerts |
+| WS   | `/ws/agent` | JSON events | Live chat, approvals, alerts (used by the agent page) |
 | WS   | `/ws` | binary `[port][bytes]` | Live UART consoles (used by the web page) |
 
 ### Pin map

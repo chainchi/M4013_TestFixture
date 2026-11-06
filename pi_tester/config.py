@@ -28,7 +28,8 @@ I2C_DEFAULT_HZ = 100_000
 I2C_PROBE_CONFIRM = 3                  # an address must answer this many times in a row
 
 # DUT UARTs. Empty = auto: USB-serial adapters in /dev/serial/by-id, ordered by
-# adapter then interface, so a CP2108 gives ports 0-3. List device paths to pin
+# adapter then interface, so a CP2108 gives ports 0-3; adapters sharing a serial
+# number are added after them by USB socket (by-path). List device paths to pin
 # ports instead, e.g. ("/dev/ttyAMA2", "/dev/ttyUSB0").
 UART_DEVICES = ()
 UART_PORTS = 4
@@ -43,6 +44,9 @@ CAMERA_FPS = 30
 CAMERA_JPEG_QUALITY = 80               # YUYV-only cameras are JPEG-encoded on the Pi
 CAMERA_IDLE_S = 5                      # stop capturing this long after the last viewer
 CAMERA_MAX_VIEWERS = 4
+
+# Agent shell tool runs commands as this login user (it has passwordless sudo)
+AGENT_SHELL_USER = "m4013pi"
 
 REDFISH_TIMEOUT_S = 15
 REDFISH_MAX_BODY = 256 * 1024
