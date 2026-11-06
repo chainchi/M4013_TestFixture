@@ -46,6 +46,18 @@ firmware lives in `G:\SOURCE_CODE\ESP32\pmbus-psu-sim`.
 
 ### Prototype
 
+**v0.2** (2026-11-06)
+
+![Bench prototype v0.2: Pi 5 with two USB-serial cables, ESP32-C6 PSU simulator, LM75 and EEPROM modules on bus 0, LEDs, STM32 tester with LCD at the right](prototype_raspberry_5_v0.2.jpg)
+
+Added since v0.1: an LM75 temperature module (CYE-LM75, 0x4A) and a 24C02
+EEPROM module (0x50) on I2C bus 0 (white breadboard, bottom left), two FTDI
+USB-serial cables for UART 0/1, and the USB camera looking at the bench. The
+ESP32-C6 PSU simulator (red breadboard) shows VIN 239 V, VOUT 12.00 V, POUT
+1600 W; the STM32 board (right) with its 2.8" LCD reads the same PMBus values.
+
+**v0.1**
+
 ![Bench prototype: Pi 5, ESP32-C6 PSU simulator on the breadboard, LEDs on GPIO/PWM, STM32 tester at the right](prototype_raspberry_5.jpg)
 
 The Pi 5 (top left) drives LEDs on the GPIO/PWM pins (yellow breadboard) and the
@@ -195,8 +207,12 @@ Linux has drivers for nearly every adapter, so the P4's adapter limits do not
 apply. The **CP2108** stays the production choice (4 ports in one), and FTDI
 (including the **FT4232H**), Prolific PL2303, CH34x/CH343 and CDC-ACM adapters
 also work. Ports are numbered by adapter, then by interface, so several
-single-port adapters become UART 0, 1, 2, 3. To pin ports to devices, or to use
-the Pi's own UARTs, set `UART_DEVICES` in `config.py`.
+single-port adapters become UART 0, 1, 2, 3. Clone adapters often share one
+serial number (both FT232R cables on this bench report `FTB6SPL3`), so they get
+a single `/dev/serial/by-id` name; the extra ones are added after the others
+under their `/dev/serial/by-path` name, i.e. by the USB socket they are in. To
+pin ports to devices, or to use the Pi's own UARTs, set `UART_DEVICES` in
+`config.py`.
 
 ## Differences from the P4 version
 
@@ -221,7 +237,8 @@ tar --exclude=__pycache__ -cf - pi_tester deploy | ssh m4013pi@192.168.10.2 \
 ```
 
 The installer:
-- installs the packages (`python3-aiohttp`, `python3-libgpiod`, `python3-smbus2`, `python3-serial`, `python3-pil`, `python3-numpy`, `i2c-tools`, `avahi-daemon`, `iw`)
+- installs the packages (`python3-aiohttp`, `python3-libgpiod`, `python3-smbus2`, `python3-serial`, `python3-pil`, `python3-numpy`, `python3-venv`, `i2c-tools`, `avahi-daemon`, `iw`)
+- creates `/opt/pi-tester-venv` (sees the packages above) with the `anthropic` SDK from PyPI for the agent; the service runs from it
 - adds the I2C bus 1 and PWM overlays to `/boot/firmware/config.txt` (first time only, then reboot)
 - copies the code to `/opt/pi-tester` and starts the `pi-tester` service at boot
 - on the first install, takes the Ethernet IP and Wi-Fi from the current netplan
@@ -231,8 +248,13 @@ Logs: `sudo journalctl -u pi-tester -f`
 ## Using it
 
 Open **http://192.168.10.2/** (Ethernet) or the Pi's Wi-Fi address. The page is
-the P4 page; see the P4 README for the controls. Every control is also an HTTP
+the P4 page; see the P4 README for the controls. On a wide screen (1100 px or
+more) drag the gaps between panels to resize them (the line lights up under the
+mouse); double-click a gap to reset it. The sizes are kept per browser. The
+agent page's chat / side panel and Watch rules / Alerts gaps work the same way. Every control is also an HTTP
 call ([docs/API.md](docs/API.md)).
+
+![Control page: GPIO, PWM, I2C, Redfish, UART 0 console and the live camera view](control_panel.jpg)
 
 ## Verify each function
 
@@ -518,8 +540,121 @@ curl -o pic.jpg %H%/api/camera/snapshot
 Expect `"present":true` with the camera's name and `"format":"MJPG"` or
 `"YUYV"`, and a JPEG in `pic.jpg`. MJPEG cameras' frames go out as they are;
 YUYV-only cameras (like the Sonix 0c45:62f1, 640×480) are JPEG-encoded on the
-Pi, about 18 % of one core while someone watches. The camera only runs while a
-page or stream is open and stops 5 s after the last viewer.
+Pi, only as often as the fastest viewer asks (about 5 % of one core at 5 fps).
+The camera only runs while a page or stream is open and stops 5 s after the
+last viewer.
+
+### 11. AI agent (http://192.168.10.2/agent)
+
+A chat page (the **Agent** button in the header) for an AI model that runs the
+bench through the same functions as the web page.
+
+![Agent page: chat with the Qwen model, tool calls shown inline, watch rules and alerts on the right](agent.jpg)
+
+**Set up a model:** **Model settings** → name, provider, address, API key,
+model → **Save** → **Test** (expect `OK in … ms`).
+
+| Provider | Address | Model, for example |
+|---|---|---|
+| Anthropic (Claude) | empty (api.anthropic.com) | `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5` |
+| OpenAI-compatible | `https://api.openai.com/v1`, `http://<pc>:11434/v1` (Ollama), any Chat Completions endpoint | the provider's model name |
+
+You can save several profiles and switch them with the **Model** list, even in
+the middle of a chat. Keys are stored on the Pi in
+`/var/lib/pi-tester/agent.json` (root only) and are never sent back to the page.
+Claude goes through the official `anthropic` SDK. With `claude-opus-5-5`,
+`claude-sonnet-5-5`, `claude-opus-5` or `claude-fable-5-1` on Anthropic's own
+address, the server-side refusal fallback is on: if the model declines a
+request for safety reasons, the API retries it on a fallback model in the same
+call.
+
+**What it can do:** read status, set GPIO/PWM, scan and talk I2C (decodes
+PMBus), read and type into the UART consoles, send Redfish requests, take a
+camera picture and look at it, wait. **Anything that changes the DUT** (GPIO,
+PWM, I2C writes, UART input, Redfish other than GET) shows an **Approve / Deny**
+card first; unanswered cards are denied after 10 minutes. The **Approvals: on**
+button in the header switches this off (red **Approvals: off (runs directly)**):
+the agent then runs every tool without asking, including from watch rules, and
+any card waiting at that moment is approved. The setting is kept across
+restarts. **Stop** ends the turn.
+
+**Shell:** the agent can run Linux commands on the Pi (`bash -lc`, as `m4013pi`
+in its home folder, so `sudo` works; no terminal or input, 60 s default timeout,
+600 s max). The **Shell** button in the header cycles **ask** (Approve / Deny
+for every command, the default) → **auto** (red, runs directly) → **off**
+(the tool answers "turned off"). It is separate from the Approvals switch.
+Every command is logged: `sudo journalctl -u pi-tester | grep "agent shell"`.
+The agent is told not to touch the network, reboot, or stop `pi-tester` /
+`cloudflared` unless you ask for exactly that, but in **auto** nothing enforces
+it.
+
+**Watch rules (monitoring):** ask for one in chat, e.g. "tell me if UART 0 prints
+PANIC" (console lines may end in CR, LF or CRLF; text without an ending, like a
+`login:` prompt, is checked after 1 s of quiet), "watch IN0 going low", or "read PMBus STATUS_WORD on bus 1 every 60 s and
+tell me if it changes". The Pi checks the rules itself (no model calls), lists
+them on the right, and shows an alert when one fires; then the agent is woken to
+investigate, at most 6 times an hour. Each rule waits 5 minutes (`cooldown_s`)
+before alerting again. Untick a rule to pause it, × to delete it.
+
+From a script (the reply comes back when the turn is done; approvals still
+happen on the page):
+
+```bat
+curl %J% -d "{\"text\":\"read VIN and VOUT of the PSU on bus 1\"}" %H%/api/agent/message
+```
+
+Notes:
+- **Cost:** every message and every fired watch rule that wakes the agent is a
+  model API call billed to the key's account. Pictures add about 1,500 tokens each.
+- **No login on the LAN page**, as with the rest of the tester: anyone on the
+  bench network can chat, approve actions and use the API key's credit. Through
+  https://pi-tester.dona-anna.com, Cloudflare Access limits it to the owner.
+- The chat is kept across restarts (`/var/lib/pi-tester/agent_history.json`);
+  **New chat** clears it. Start a new chat when it gets long; each message
+  re-sends the whole conversation.
+
+### 12. System page (http://192.168.10.2/system)
+
+A live diagram of the whole tester (the **System** button in the header): the
+network side on the left, the Pi's software blocks in the middle, the bench
+wiring on the right. It updates every second from `GET /api/system`.
+
+![System page: status line on top, network side, Pi blocks and bench devices with moving data dots, events and legend on the right](system.jpg)
+
+- **Fits the window:** the whole page shows without scrolling; the diagram
+  scales to the space left, and only the event list scrolls once it is long.
+  Full screen (F11) on a large monitor gives the biggest text. Below 900 px
+  wide (phones) the panels stack and the page scrolls.
+
+- **Easy to read:** large text by default (**Text: Large / Normal** in the
+  header). A line at the top says in plain words whether everything works and
+  lists what doesn't; click an item and its block flashes on the diagram.
+- **Status in words and symbols, not only colour:** ✓ OK (green), ⇄ Busy
+  (blue), ! Check (amber), ✕ Down (red, blinking), – Off (grey), each with a
+  short reason such as "not answering" or "fault bits set".
+- **Moving dots show the data:** blue dots go out from the Pi, orange dots come
+  in. More data gives more and faster dots (Ethernet/Wi-Fi bytes, I2C
+  transfers, UART bytes, camera frames, the agent talking to its model, PWM).
+  The amount is shown in a bubble on the main links. A dashed red line is a
+  broken link.
+- **Live values:** CPU, temperature, memory, load and network traffic with a
+  2-minute trend; the PSU simulator's VIN/VOUT/POUT/IOUT and status on a
+  mock LCD; the bench LEDs (slow PWM blinks at its real rate, fast PWM shows
+  its duty as brightness); UART ports with RX activity; the agent's model,
+  approvals and watch rules; whether the DUT's BMC answers on its port.
+- **What just happened** lists every change in plain words (links, services,
+  UART plug/unplug, PSU values and status bits, I2C devices not answering,
+  agent alerts); the block it concerns flashes, and clicking the line flashes
+  it again.
+- **Read I2C devices** (on by default) reads the PSU simulator and probes the
+  EEPROM every 3 s, read-only. Turn it off to keep the buses quiet. A read the
+  device misses is retried once and counted as a glitch (amber, in Events);
+  these page reads are not counted in the I2C transfer numbers.
+- **LM75** (bus 0): probed every second at all of 0x48-0x4F, without a retry,
+  so a loose wire or a floating address pin shows at once: temperature, the
+  address it answered at, and how many of the last 60 probes it answered
+  (hover the block for totals and every address seen).
+- Click a block to open its page.
 
 ## Project layout
 
@@ -533,9 +668,15 @@ pi_tester/
   redfish.py      HTTPS client to the DUT
   net.py          Ethernet/Wi-Fi status, netplan settings
   camera.py       USB webcam capture (V4L2), MJPEG stream
+  agent.py        AI agent: chat, approvals, watch rules, /agent API
+  agent_llm.py    model providers (Claude SDK, OpenAI-compatible)
+  agent_tools.py  the agent's bench tools
+  system_view.py  /system page data (/api/system)
   web_server.py   REST API, WebSocket consoles, UART streams (aiohttp)
   web/index.html  the control page (P4 page, renamed)
   web/camera.html full-page camera view
+  web/agent.html  agent chat page
+  web/system.html live system diagram
 deploy/
   install.sh      installer
   pi-tester.service
@@ -550,7 +691,18 @@ docs/API.md       HTTP API reference
   stops cloud-init from rewriting the network. A wrong IP can cut off the
   Ethernet link; the Pi still answers on its IPv6 link-local address
   (`fe80::9afe:54ff:fe64:fb0b%<PC interface>`).
-- **I2C scan** uses the P4's method: a 1-byte read, 3 answers in a row.
+- **I2C scan** uses the P4's method: a 1-byte read, 3 answers in a row. The PSU
+  simulator takes that bare read as an unsupported command and latches
+  STATUS_CML 0x80 after every scan of bus 1 (reading a register it doesn't
+  implement, e.g. 0x7F, does the same). Send CLEAR_FAULTS (0x03) after a scan
+  if the status must read clean.
+- **Bus 1 has no pull-ups on the Pi** (header 7/29). With only the simulator's
+  pull-ups and breadboard wires, about one transfer a minute arrives corrupted
+  (CML 0x80 or 0x40 with only valid reads; the kernel logs `lost arbitration`,
+  `SDA stuck at low`). Add 4.7 kΩ pull-ups to 3.3 V and keep the wires short.
+- **USB hub:** a USB-serial cable on the hub was dropped with
+  `disabled by hub (EMI?)` and then failed to enumerate (error -71). Plug the
+  adapters straight into the Pi and connect only GND/TX/RX to the DUT.
 - **I2C transfers** are raw, 7-bit addresses, up to 256 bytes each way. No PMBus
   PEC is added; the PSU simulator accepts writes without it.
 - **One master per I2C bus.** With the STM32 bit-bang tester on the same bus, the
@@ -567,12 +719,18 @@ docs/API.md       HTTP API reference
 | PWM 1 Hz and 25 kHz, disable holds low (checked with `pinctrl` and sysfs) | ✅ |
 | I2C buses 0 and 1: scan (idle lines high, no devices), NACK reply | ✅ |
 | I2C bus 1 vs PMBus PSU simulator (0x40): scan, reads, writes, MFR_SET_LOAD 0xD0, STATUS_CML 00 | ✅ with the STM32 tester off the bus |
-| PSU simulator VOUT_COMMAND 0x21 | ⬜ firmware flashed, waiting for test results |
-| PSU simulator MFR_SET_VIN 0xD1 | ⬜ firmware flashed (60f24ae), waiting for test results |
-| EEPROM 24C02 on bus 0 (0x50): write and read back | ⬜ connected, not yet tested |
+| PSU simulator VOUT_COMMAND 0x21 (12.2 / 11.8 V, 13.0 V rejected with CML 0x40) | ✅ |
+| PSU simulator MFR_SET_VIN 0xD1 (120 / 264 V; READ_VIN follows the VIN knob) | ✅ |
+| EEPROM 24C02 on bus 0 (0x50): write and read back, two patterns | ✅ |
 | PSU simulator side-band pins (SMBALERT#, PRESENT#, PS_ON#) | ⬜ not wired |
 | UART hub + WebSocket + scrollback (virtual serial port) | ✅ |
-| UART with a real CP2108 / FTDI adapter | ⬜ no adapter connected |
+| UART 0 with a real FTDI FT232R adapter (console typing) | ✅ |
+| UART 1 with a second FT232R (same serial number) | ⬜ adapter drops off USB; by-path fallback deployed, not yet seen working |
+| UART with a CP2108 | ⬜ no adapter connected |
 | Redfish error path (no DUT) | ✅ real DUT not yet |
 | Settings read/write; netplan generation validated | ✅ not yet applied with a reboot |
 | USB camera (Sonix YUYV 640×480): live view, /camera page, snapshot | ✅ through Cloudflare not yet |
+| Agent: tool loop, approve/deny, watch rule, profile test (fake OpenAI-compatible endpoint) | ✅ |
+| Agent with a real OpenAI-compatible model (Qwen) | ✅ |
+| Agent with a real Claude key | ⬜ waiting for a key |
+| System page: live diagram, events, PSU readout, LM75, fits the window | ✅ |
