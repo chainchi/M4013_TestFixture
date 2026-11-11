@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pi Terminal</title>
+<link rel="stylesheet" href="/vendor/xterm.css">
+<style>
+:root{--bg:#f4f5f7;--fg:#1c1f24;--mut:#6b7280;--line:#dde0e5;--acc:#2563eb;--ok:#15803d;--bad:#b91c1c;--term:#0f1115}
+@media (prefers-color-scheme:dark){:root{--bg:#14161a;--fg:#e6e8eb;--mut:#9aa1ab;--line:#2c3038;--acc:#5b8cff;--ok:#4ade80;--bad:#f87171}}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.4 system-ui,Segoe UI,Arial,sans-serif;display:flex;flex-direction:column;overflow:hidden}
+header{display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+header h1{font-size:17px;margin:0}
+header .sp{flex:1}
+a.back{color:var(--fg);text-decoration:none}
+button{font:inherit;cursor:pointer;color:var(--fg);background:transparent;border:1px solid var(--line);border-radius:6px;padding:5px 10px}
+button:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+#st{font-weight:600}
+#st.ok{color:var(--ok)} #st.bad{color:var(--bad)}
+.hint{color:var(--mut);font-size:13px}
+#wrap{flex:1;min-height:0;background:var(--term);padding:6px 4px 4px 8px}
+#term{width:100%;height:100%}
+</style>
+</head>
+<body>
+<header>
+  <a class="back" href="/">← Test host</a>
+  <h1>Terminal</h1>
+  <span id="st">connecting…</span>
+  <span class="hint">shared session: Claude and anyone else on this page see and type into the same shell.
+    Scroll back with the mouse wheel or ▲/▼ (Shift+PgUp/PgDn); Shift+drag selects text.</span>
+  <span class="sp"></span>
+  <button id="up" title="Scroll back one page (Shift+PgUp)">▲</button>
+  <button id="down" title="Scroll forward one page (Shift+PgDn); at the bottom it returns to the live screen">▼</button>
+  <button id="smaller" title="Smaller text">A−</button>
+  <button id="bigger" title="Bigger text">A+</button>
+  <button id="again" hidden>Reconnect</button>
+</header>
+<div id="wrap"><div id="term"></div></div>
+<script src="/vendor/xterm.js"></script>
+<script src="/vendor/addon-fit.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+let size = 15;
+try { size = +localStorage.getItem('termFont') || 15; } catch (e) {}
+const term = new Terminal({fontSize: size, cursorBlink: true, scrollback: 2000,
+  fontFamily: 'ui-monospace, "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace',
+  theme: {background: '#0f1115', foreground: '#d6dde6'}});
+const fit = new FitAddon.FitAddon();
+term.loadAddon(fit);
+term.open($('term'));
+let ws;
+
+function status(text, cls){ $('st').textContent = text; $('st').className = cls || ''; }
+function sendSize(){
+  fit.fit();
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({resize: [term.cols, term.rows]}));
+}
+function connect(){
+  $('again').hidden = true;
+  status('connecting…');
+  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/terminal');
+  ws.binaryType = 'arraybuffer';
+  ws.onopen = () => { status('connected', 'ok'); sendSize(); term.focus(); };
+  ws.onmessage = e => term.write(new Uint8Array(e.data));
+  ws.onclose = () => { status('disconnected', 'bad'); $('again').hidden = false; };
+}
+const enc = new TextEncoder();
+term.onData(d => { if (ws && ws.readyState === 1) ws.send(enc.encode(d)); });
+new ResizeObserver(() => sendSize()).observe($('wrap'));
+function font(d){
+  size = Math.max(10, Math.min(32, size + d));
+  term.options.fontSize = size;
+  try { localStorage.setItem('termFont', size); } catch (e) {}
+  sendSize();
+}
+$('smaller').onclick = () => font(-2);
+$('bigger').onclick = () => font(2);
+$('again').onclick = connect;
+// tmux (deploy/tmux.conf) binds Shift+PgUp/PgDn to page through its history
+function key(seq){ if (ws && ws.readyState === 1) ws.send(enc.encode(seq)); term.focus(); }
+$('up').onclick = () => key('\x1b[5;2~');
+$('down').onclick = () => key('\x1b[6;2~');
+connect();
+</script>
+</body>
+</html>

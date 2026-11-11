@@ -107,12 +107,62 @@ The web page is also published through a **Cloudflare Tunnel** with a
 | Zero Trust team | `holy-thunder-658c` (Free plan) |
 
 - Without a login, every request (page and API) gets a 302 to the Access login page.
+- **SSH from anywhere:** `ssh.dona-anna.com` is a second tunnel route
+  (`ssh://localhost:22`), in the same Access app and policy. On the PC, install
+  `cloudflared` (`winget install Cloudflare.cloudflared`) and add to
+  `~/.ssh/config`:
+  ```
+  Host m4013pi-cf
+      HostName ssh.dona-anna.com
+      User m4013pi
+      ProxyCommand "C:/Program Files (x86)/cloudflared/cloudflared.exe" access ssh --hostname %h
+  ```
+  `ssh m4013pi-cf` opens the Cloudflare login in a browser the first time; the
+  login is then kept (24 h by default).
 - To let someone else in, add their email to the `M4013 owner only` policy
   (Zero Trust → Access controls → Policies).
 - curl/scripts through Cloudflare need an Access service token; on the bench
   use `http://192.168.10.2` directly.
 - On the Pi: `systemctl status cloudflared`, `journalctl -u cloudflared -f`.
   To take it offline: `sudo systemctl stop cloudflared` (or `disable` to keep it off after reboot).
+
+### Wi-Fi setup without a screen (setup mode)
+
+Like many IoT devices, the Pi can be put on a new Wi-Fi with only a phone:
+
+1. Power the Pi on where you want it. If it can't join any Wi-Fi it knows within
+   about a minute, it opens its own open network **`M4013-Setup-FB0C`** (the end
+   is the last 4 digits of the Pi's Wi-Fi MAC).
+2. On the iPhone, **Settings → Wi-Fi → M4013-Setup-FB0C**. The setup page pops up
+   by itself (if not, open Safari at `http://192.168.4.1`).
+3. Tap the network, type its password, **Connect**. The setup network closes a
+   few seconds later and the phone goes back to its own Wi-Fi.
+4. On that network, open **http://m4013pi.local** (or the Cloudflare address).
+
+If the password was wrong or the network is out of range, the setup network
+comes back about a minute later and the page says what failed. With nobody on
+the setup network for 5 minutes, the Pi tries its known Wi-Fi again, so after a
+router reboot it reconnects by itself. The Ethernet address (192.168.10.2) stays
+as it is throughout.
+
+- The saved network replaces the old one, as on the Settings page (one Wi-Fi at
+  a time) and is applied straight away.
+- The setup network is open (no password) and only on while setup mode is.
+  Anyone nearby could join it then and set the Wi-Fi.
+- **Setup button:** a push button between **header pin 37 (GPIO26)** and **pin
+  39 (GND)**, no resistor needed (internal pull-up). Hold it **3 s** and setup
+  mode starts at once, even when the Pi is on a working Wi-Fi. To use it while
+  powering on, hold it until the green LED blinks fast (about 20 s after power).
+  A short tap does nothing.
+- **Green LED (ACT)** blinks fast while setup mode is on, and goes back to
+  normal (SD-card activity) when it ends.
+- To change networks while the Pi is still on the old one, start setup mode by
+  hand: `curl -H "Content-Type: application/json" -d "{\"action\":\"start\"}" http://192.168.10.2/api/wifi-setup`
+  (`"stop"` ends it).
+- Settings are in `config.py` (`WIFI_SETUP_*`: name, address 192.168.4.1,
+  channel, the 60 s wait, the 5 min retry, button pin and hold time, LED; `WIFI_SETUP = False` turns it off).
+  It needs `hostapd` (installed by `install.sh`; its own service stays masked).
+- Log: `journalctl -u pi-tester | grep wifi-setup`.
 
 ## Pin map: P4-Nano → Raspberry Pi 5
 
@@ -154,8 +204,8 @@ GPIO numbers are BCM numbers. "Header" is the physical pin on the 40-pin header.
                    GPIO6 (31) (32) GPIO12
                   GPIO13 (33) (34) GND
             PWM1  GPIO19 (35) (36) GPIO16
-                  GPIO26 (37) (38) GPIO20
-                     GND (39) (40) GPIO21
+    SETUP button  GPIO26 (37) (38) GPIO20
+   button to GND     GND (39) (40) GPIO21
 ```
 
 Pins are set in `pi_tester/config.py`. Outputs and PWM use GPIO 17–27, which
@@ -244,6 +294,39 @@ The installer:
 - on the first install, takes the Ethernet IP and Wi-Fi from the current netplan
 
 Logs: `sudo journalctl -u pi-tester -f`
+
+Without the cable, replace `m4013pi@192.168.10.2` with `m4013pi-cf` (SSH through
+Cloudflare, see [SSH from anywhere](#remote-access-httpspi-testerdona-annacom)).
+
+### Updating single files
+
+The PC copy is the master (it is the git repository); the Pi only runs a copy.
+For a small change there is no need to rerun the installer: send the changed
+file over SSH and let `sudo tee` write it into the root-owned `/opt/pi-tester`:
+
+```bash
+PI=m4013pi-cf        # or m4013pi@192.168.10.2 on the cable
+ssh $PI "sudo tee /opt/pi-tester/pi_tester/web/terminal.html >/dev/null" < pi_tester/web/terminal.html
+```
+
+Several files in one go, as a tar stream (paths are kept):
+
+```bash
+tar --exclude=__pycache__ -cf - pi_tester/terminal.py pi_tester/web/terminal.html |
+  ssh $PI "sudo tar -xf - -C /opt/pi-tester --no-same-owner"
+```
+
+Then make the change take effect:
+
+| Changed | Needed |
+|---|---|
+| `.py` files | `ssh $PI sudo systemctl restart pi-tester` |
+| pages in `web/` | nothing, they are read on every request; refresh the browser |
+| `deploy/tmux.conf` | `ssh $PI "cat > ~/.tmux.conf && tmux source-file ~/.tmux.conf" < deploy/tmux.conf` |
+
+`scp` cannot use sudo, so it cannot write into `/opt/pi-tester` directly; the
+pipes above avoid a second copy step. A new board always gets the full
+installer instead.
 
 ## Using it
 
@@ -656,6 +739,33 @@ wiring on the right. It updates every second from `GET /api/system`.
   (hover the block for totals and every address seen).
 - Click a block to open its page.
 
+### 13. Terminal (https://pi-tester.dona-anna.com/terminal)
+
+A shell on the Pi in the browser (the **Terminal** button in the header), logged
+in as `m4013pi`. It is the tmux session `shared`, the same one
+`tools/pirun.sh` types into, so Claude's commands show up live on the page and
+anyone on it (or attached with `ssh -t m4013pi@<pi> tmux new -A -s shared`) can
+type into the same shell. Closing the page leaves the session running.
+
+- **Only through Cloudflare or the cable:** it is a full shell with sudo and the
+  tester has no login, so `/terminal` opens only through
+  `https://pi-tester.dona-anna.com` (after the Cloudflare email login) or over the
+  direct Ethernet link (`http://192.168.10.2/terminal`). From the Wi-Fi LAN or
+  the setup network it answers 403.
+- **A− / A+** change the text size (kept per browser).
+- **Scrolling back:** mouse wheel, the **▲ / ▼** buttons (one page each, handy
+  on a phone) or Shift+PgUp / Shift+PgDn. The yellow `[n/total]` tag at the top
+  right means you are in scroll mode; scrolling back to the bottom, q or Esc
+  returns to the live screen. The session keeps 50 000 lines. Because tmux now
+  takes the mouse, hold **Shift** while dragging to select text for copying.
+  These settings are in `deploy/tmux.conf`, installed as `~m4013pi/.tmux.conf`.
+- tmux keys work as usual: Ctrl+B then `[` also scrolls back, Ctrl+B then `d`
+  detaches only this page.
+- Each open/close is logged with the Cloudflare user's email:
+  `journalctl -u pi-tester | grep terminal:`.
+- xterm.js 5.5.0 (MIT) is served from the Pi (`web/vendor`), so the page works
+  without internet on the cable.
+
 ## Project layout
 
 ```
@@ -672,14 +782,22 @@ pi_tester/
   agent_llm.py    model providers (Claude SDK, OpenAI-compatible)
   agent_tools.py  the agent's bench tools
   system_view.py  /system page data (/api/system)
+  wifi_setup.py   Wi-Fi setup mode: setup network, captive page, DNS
+  terminal.py     web terminal: shared tmux session over a WebSocket
   web_server.py   REST API, WebSocket consoles, UART streams (aiohttp)
   web/index.html  the control page (P4 page, renamed)
   web/camera.html full-page camera view
   web/agent.html  agent chat page
   web/system.html live system diagram
+  web/setup.html  Wi-Fi setup page (phone)
+  web/terminal.html  web terminal page
+  web/vendor/     xterm.js + fit addon (MIT)
 deploy/
   install.sh      installer
   pi-tester.service
+  tmux.conf       shared terminal session: mouse scrollback, 50 000 lines
+tools/
+  pirun.sh        run a command in the shared terminal from the PC, print its output
 docs/API.md       HTTP API reference
 ```
 
@@ -734,3 +852,7 @@ docs/API.md       HTTP API reference
 | Agent with a real OpenAI-compatible model (Qwen) | ✅ |
 | Agent with a real Claude key | ⬜ waiting for a key |
 | System page: live diagram, events, PSU readout, LM75, fits the window | ✅ |
+| Wi-Fi setup mode: setup network, DNS + portal redirect, wrong network falls back, saved network joined, service restart cleans up | ✅ incl. iPhone: join, page, save, rejoin in 12 s |
+| Setup button GPIO26: 3 s hold starts setup mode, short tap ignored, ACT LED blinks | ✅ real button |
+| Web terminal: shared tmux session, typing and output over the WebSocket, pirun.sh into the same session, Wi-Fi LAN refused (403) | ✅ also in a browser through Cloudflare |
+| Web terminal scrollback: mouse wheel, ▲/▼ buttons, back to the live screen at the bottom | ✅ through Cloudflare |

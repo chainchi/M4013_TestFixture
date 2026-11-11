@@ -11,7 +11,9 @@ ssh_pi() { ssh -o BatchMode=yes -o ConnectTimeout=5 "$H" "$@"; }
 
 # one { ... } block over two lines: bash reads both before running anything, so
 # a trailing comment in cmd can't swallow the marker and sudo can't discard it
+# leave scroll (copy) mode first, or the keys would go to it instead of the shell
 ssh_pi "tmux has-session -t shared 2>/dev/null || tmux new-session -d -s shared -x 160 -y 45
+[ \"\$(tmux display -p -t shared '#{pane_in_mode}')\" = 1 ] && tmux send-keys -t shared -X cancel
 tmux send-keys -t shared -l -- $(printf %q "{ $cmd")
 tmux send-keys -t shared Enter
 tmux send-keys -t shared -l -- $(printf %q "}; echo \"#done-$id rc=\$?\"")

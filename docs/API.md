@@ -34,6 +34,11 @@ tester speaks to the DUT (see `/api/redfish` below).
 | GET  | `/camera` | – | Full-page camera view |
 | GET  | `/system` | – | Live system diagram page |
 | GET  | `/api/system[?i2c=0]` | – | Everything the system page shows: `host` (CPU, temp, memory, load, throttled), `services`, `net` (eth/wifi bytes, DUT BMC reachable), `i2c` (per-bus transfer/NACK/fault counters, PSU readings, EEPROM present; `i2c=0` skips the device reads), `gpio_out`, `gpio_in`, `pwm`, `uart` (with RX/TX byte totals), `camera`, `agent`, `web` |
+| GET  | `/setup` | – | Wi-Fi setup page (served to phones on the setup network) |
+| GET  | `/api/wifi-setup` | – | `active`, `ap_ssid`, `ap_ip`, `clients`, `networks` (scan: `ssid`, `signal`, `secure`), `trying`, `last` (`ssid`, `ok`, `msg`, `time`), `known` |
+| POST | `/api/wifi-setup` | `{"ssid","password"}` or `{"action":"start"\|"stop"}` | Save a network (setup mode only; applied a few seconds later), or start/stop setup mode |
+| GET  | `/terminal` | – | Web terminal page; 403 unless through the Cloudflare tunnel (loopback) or the Ethernet link |
+| GET  | `/ws/terminal` | WebSocket | Shared tmux session `shared`: binary frames = keystrokes in / terminal output out; text `{"resize":[cols,rows]}`. Same access rule |
 | GET  | `/agent` | – | AI agent chat page |
 | POST | `/api/agent/message` | `{"text":"..."}` (`"wait":false` to only queue) | Ask the agent; returns `{"reply":"..."}` when the turn ends |
 | GET/POST | `/api/agent/config` | `{"profile":{"name","provider":"anthropic"\|"openai","base_url","api_key","model","effort"}}`, `{"active":name}`, `{"delete":name}` | Model profiles (GET never returns keys) |

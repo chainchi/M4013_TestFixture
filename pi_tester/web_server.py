@@ -9,7 +9,7 @@ import time
 
 from aiohttp import WSMsgType, web
 
-from . import agent, camera, config, i2c_ctrl, io_ctrl, net, redfish, settings, system_view, uart_hub
+from . import agent, camera, config, i2c_ctrl, io_ctrl, net, redfish, settings, system_view, terminal, uart_hub, wifi_setup
 
 WS_CHUNK = 4096
 PUMP_PERIOD_S = 0.03
@@ -396,7 +396,7 @@ def main():
     io_ctrl.init()
     uart_hub.init()
 
-    app = web.Application(client_max_size=8192)
+    app = web.Application(client_max_size=8192, middlewares=[wifi_setup.captive])
     app.add_routes([
         web.get("/", h_index),
         web.get("/api/status", h_status),
@@ -418,10 +418,14 @@ def main():
         web.get("/ws", h_ws),
         *agent.ROUTES,
         *system_view.ROUTES,
+        *wifi_setup.ROUTES,
+        *terminal.ROUTES,
+        web.static("/vendor", os.path.join(os.path.dirname(__file__), "web", "vendor")),
     ])
     system_view.extra = lambda: {"console_pages": len(_ws_clients), "uart_streams": _streams,
                                  "camera_viewers": camera.cam.viewers}
     app.on_startup.append(_on_startup)
+    app.on_startup.append(wifi_setup.on_startup)
     app.on_shutdown.append(_on_shutdown)
     print(f"web: serving on port {config.HTTP_PORT}", flush=True)
     # endless camera/UART streams are cancelled after this, not waited for

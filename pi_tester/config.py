@@ -47,6 +47,10 @@ CAMERA_MAX_VIEWERS = 4
 
 # Agent shell tool runs commands as this login user (it has passwordless sudo)
 AGENT_SHELL_USER = "m4013pi"
+# Web terminal (/terminal): tmux session it attaches to, as this user; the same
+# session tools/pirun.sh uses, so everyone attached shares one shell
+TERMINAL_USER = AGENT_SHELL_USER
+TERMINAL_SESSION = "shared"
 
 REDFISH_TIMEOUT_S = 15
 REDFISH_MAX_BODY = 256 * 1024
@@ -57,3 +61,18 @@ ETH_IF = "eth0"
 WIFI_IF = "wlan0"
 WIFI_COUNTRY = "TW"
 NETPLAN_FILE = "/etc/netplan/60-pi-tester.yaml"
+
+# Wi-Fi setup mode (wifi_setup.py): with no known Wi-Fi joined for WAIT_S, the Pi
+# opens its own open network for a phone to pick the Wi-Fi on. Needs hostapd.
+WIFI_SETUP = True
+WIFI_SETUP_SSID = ""                   # empty = "M4013-Setup-" + last 4 of the wlan0 MAC
+WIFI_SETUP_IP = "192.168.4.1"
+WIFI_SETUP_CHANNEL = 6                 # 2.4 GHz, every phone has it
+WIFI_SETUP_WAIT_S = 60                 # known networks get this long, after boot or a drop
+WIFI_SETUP_RETRY_S = 300               # setup network with nobody on it: try known ones again
+WIFI_SETUP_POLL_S = 5
+# Push button to GND that starts setup mode when held, also while booting.
+# GPIO26 = header 37, GND next to it on header 39. None = no button.
+WIFI_SETUP_BUTTON = 26
+WIFI_SETUP_BUTTON_HOLD_S = 3
+WIFI_SETUP_LED = "/sys/class/leds/ACT"   # the board's green LED blinks fast in setup mode

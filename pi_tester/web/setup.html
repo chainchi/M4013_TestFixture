@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Wi-Fi Setup</title>
+<style>
+:root{--bg:#f4f6f8;--card:#fff;--fg:#14181c;--dim:#5b6570;--line:#d5dbe1;--acc:#0a66d6;--ok:#16794a;--bad:#b3261e;--sel:#e6f0fc}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1316;--card:#1a2026;--fg:#eef2f5;--dim:#9aa6b2;--line:#2e3740;--acc:#4c9bff;--ok:#4cc38a;--bad:#ff7a70;--sel:#17304d}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:18px/1.45 -apple-system,system-ui,"Segoe UI",sans-serif}
+main{max-width:520px;margin:0 auto;padding:20px 16px 40px}
+h1{font-size:26px;margin:4px 0 2px}
+.sub{color:var(--dim);margin:0 0 18px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px}
+.msg{border-radius:12px;padding:12px 14px;margin-bottom:16px;font-weight:600}
+.msg.bad{background:color-mix(in srgb,var(--bad) 14%,transparent);color:var(--bad)}
+.msg.ok{background:color-mix(in srgb,var(--ok) 14%,transparent);color:var(--ok)}
+h2{font-size:17px;margin:0 0 10px;color:var(--dim);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.net{display:flex;align-items:center;gap:12px;width:100%;padding:14px 12px;border:1px solid var(--line);border-radius:10px;background:none;color:inherit;font:inherit;text-align:left;margin-bottom:8px;cursor:pointer}
+.net[aria-pressed=true]{border-color:var(--acc);background:var(--sel)}
+.net .name{flex:1;overflow-wrap:anywhere}
+.bars{display:inline-flex;align-items:flex-end;gap:2px;height:18px}
+.bars i{width:4px;background:var(--line);border-radius:1px}
+.bars i.on{background:var(--fg)}
+.lock{color:var(--dim);font-size:15px}
+label{display:block;font-weight:600;margin:14px 0 6px}
+input{width:100%;font:inherit;padding:13px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:inherit}
+.row{display:flex;gap:8px;align-items:center;margin-top:8px;color:var(--dim)}
+.row input{width:22px;height:22px;margin:0}
+button.go{width:100%;margin-top:18px;padding:16px;border:0;border-radius:12px;background:var(--acc);color:#fff;font:inherit;font-weight:700;font-size:20px;cursor:pointer}
+button.go:disabled{opacity:.5}
+.empty{color:var(--dim)}
+.done{text-align:center}
+.done .big{font-size:56px;line-height:1;margin:8px 0 6px;color:var(--ok)}
+code{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:1px 6px}
+</style>
+</head>
+<body>
+<main>
+  <h1>Wi-Fi setup</h1>
+  <p class="sub" id="sub">M4013 test station</p>
+  <div id="last"></div>
+  <div id="form">
+    <div class="card">
+      <h2>Choose a network</h2>
+      <div id="nets"><p class="empty">Loading…</p></div>
+      <button class="net" id="other" aria-pressed="false"><span class="name">Other network (type the name)…</span></button>
+      <div id="otherBox" hidden>
+        <label for="ssid">Network name</label>
+        <input id="ssid" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="32">
+      </div>
+    </div>
+    <div class="card">
+      <label for="pw" style="margin-top:0">Password</label>
+      <input id="pw" type="password" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="63" placeholder="leave empty for an open network">
+      <div class="row"><input type="checkbox" id="show"><label for="show" style="margin:0;font-weight:400">Show password</label></div>
+      <button class="go" id="save" disabled>Connect</button>
+      <div id="err"></div>
+    </div>
+  </div>
+  <div id="done" class="card done" hidden></div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+let chosen = '';
+
+function bars(sig){
+  const n = sig >= -55 ? 4 : sig >= -67 ? 3 : sig >= -78 ? 2 : 1;
+  return '<span class="bars" aria-label="signal ' + n + ' of 4">' +
+    [6,10,14,18].map((h,i) => '<i style="height:'+h+'px" class="'+(i<n?'on':'')+'"></i>').join('') + '</span>';
+}
+function esc(s){ return s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+function pick(btn, ssid){
+  document.querySelectorAll('.net').forEach(b => b.setAttribute('aria-pressed', b === btn));
+  $('otherBox').hidden = btn !== $('other');
+  chosen = ssid;
+  if (btn === $('other')) $('ssid').focus(); else $('pw').focus();
+  check();
+}
+function check(){
+  const ssid = $('otherBox').hidden ? chosen : $('ssid').value.trim();
+  const pw = $('pw').value;
+  $('save').disabled = !ssid || (pw.length > 0 && pw.length < 8);
+}
+
+async function load(){
+  let s;
+  try { s = await (await fetch('/api/wifi-setup', {cache:'no-store'})).json(); } catch(e) { return; }
+  $('sub').textContent = 'M4013 test station · setup network ' + s.ap_ssid;
+  if (s.last && !s.last.ok)
+    $('last').innerHTML = '<div class="msg bad">Last try: ' + esc(s.last.msg) + '. Check the password and try again.</div>';
+  const box = $('nets');
+  box.innerHTML = s.networks.length ? '' : '<p class="empty">No networks found. Use "Other network".</p>';
+  for (const n of s.networks){
+    const b = document.createElement('button');
+    b.className = 'net'; b.setAttribute('aria-pressed', 'false');
+    b.innerHTML = '<span class="name">' + esc(n.ssid) + (n.ssid === s.known ? ' <span class="lock">(saved)</span>' : '') +
+      '</span>' + (n.secure ? '<span class="lock" aria-label="needs a password">🔒</span>' : '') + bars(n.signal);
+    b.onclick = () => pick(b, n.ssid);
+    box.appendChild(b);
+  }
+}
+
+$('other').onclick = () => pick($('other'), '');
+$('ssid').oninput = check;
+$('pw').oninput = check;
+$('show').onchange = () => { $('pw').type = $('show').checked ? 'text' : 'password'; };
+$('save').onclick = async () => {
+  const ssid = $('otherBox').hidden ? chosen : $('ssid').value.trim();
+  $('save').disabled = true; $('err').innerHTML = '';
+  let r;
+  try {
+    r = await (await fetch('/api/wifi-setup', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ssid, password: $('pw').value})})).json();
+  } catch(e) { r = {ok:false, error:'the station did not answer'}; }
+  if (!r.ok){
+    $('err').innerHTML = '<div class="msg bad" style="margin:14px 0 0">' + esc(r.error || 'failed') + '</div>';
+    check(); return;
+  }
+  $('form').hidden = true; $('last').innerHTML = '';
+  $('done').hidden = false;
+  $('done').innerHTML = '<div class="big">✓</div><h2 style="text-transform:none;font-size:22px;color:inherit">Saved</h2>' +
+    '<p>The station is now joining <b>' + esc(ssid) + '</b>. This setup network closes in a few seconds and your phone goes back to its usual Wi-Fi.</p>' +
+    '<p>On <b>' + esc(ssid) + '</b>, open <code>http://m4013pi.local</code>.</p>' +
+    '<p class="empty">If the password was wrong, this setup network comes back in about a minute so you can try again.</p>';
+};
+load();
+</script>
+</body>
+</html>

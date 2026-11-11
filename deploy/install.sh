@@ -5,7 +5,7 @@ set -e
 cd "$(dirname "$0")/.."
 
 apt-get install -y -qq -o DPkg::Lock::Timeout=600 \
-    python3-aiohttp python3-libgpiod python3-smbus2 python3-serial python3-pil python3-numpy python3-venv     gpiod i2c-tools avahi-daemon iw
+    python3-aiohttp python3-libgpiod python3-smbus2 python3-serial python3-pil python3-numpy python3-venv     gpiod i2c-tools avahi-daemon iw hostapd
 
 # Venv for the agent's Claude SDK (Ubuntu's python3-anthropic is too old); it
 # still sees the apt packages above
@@ -48,6 +48,9 @@ os.chmod(path, 0o600)
 print("settings seeded:", {k: v for k, v in s.items() if k != "wifi_pass"})
 EOF
 fi
+
+# Shared tmux session used by the web terminal: mouse-wheel scrollback
+install -m 644 -o m4013pi -g m4013pi deploy/tmux.conf /home/m4013pi/.tmux.conf
 
 cp deploy/pi-tester.service /etc/systemd/system/
 systemctl daemon-reload
