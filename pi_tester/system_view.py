@@ -14,7 +14,7 @@ from collections import Counter, deque
 
 from aiohttp import web
 
-from . import agent, camera, config, i2c_ctrl, io_ctrl, net, settings, uart_hub
+from . import agent, camera, config, fleet_web, i2c_ctrl, io_ctrl, net, settings, terminal, uart_hub
 
 _PAGE = os.path.join(os.path.dirname(__file__), "web", "system.html")
 _STARTED = time.time()
@@ -265,6 +265,26 @@ def _agent():
         "approvals": len(a.approvals), "messages": len(a.history), "pages": len(a.clients),
     }
 
+def _fleet():
+    """The systems on /fleet, short: status, activity, HMC light. No passwords (fleet_web
+    already drops them), and only sent where /fleet itself may be opened."""
+    st = fleet_web._state()
+    out = []
+    for s in st["systems"]:
+        p, h = s.get("progress") or {}, s.get("hmc_status")
+        bmc = s.get("type") == "bmc" or s.get("profile") == "bmc-openbmc"
+        out.append({
+            "name": s.get("name"), "addr": f"{s.get('ip')}:{s.get('port') or 22}",
+            "kind": "BMC" if bmc else "GPU host" if s.get("profile") == "gpu-vera" else "host",
+            "server": s.get("server") or "", "status": s.get("status") or "", "last": s.get("last") or "",
+            "flags": len(s.get("flag_list") or []), "flag1": (s.get("flag_list") or [""])[0][:120],
+            "problem": s.get("problem") or "",
+            "act": {k: p.get(k) for k in ("kind", "state", "stage", "step", "i", "n", "result", "started", "finished")} if p else None,
+            "hmc": {k: h.get(k) for k in ("bmc", "ping", "redfish", "http", "ms", "checked", "ip")} if bmc and h else None,
+        })
+    return {"systems": out, "checking": st["check"]["running"], "error": st.get("error")}
+
+
 # ---------- http ----------
 
 
@@ -285,6 +305,7 @@ async def h_api(req):
         "camera": await asyncio.to_thread(camera.cam.status),
         "agent": _agent(),
         "web": extra(),
+        "fleet": (await asyncio.to_thread(_cached, "fleet", 1.5, _fleet)) if terminal.allowed(req) else {"hidden": True},
     }, headers={"Cache-Control": "no-store"})
 
 

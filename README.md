@@ -608,6 +608,31 @@ Expect the settings as JSON (passwords are not shown, only `dut_pass_set` /
 their value. Changing the IP or Wi-Fi only takes effect after a reboot
 (`curl -X POST %H%/api/reboot`); write down the new IP first.
 
+**Clone the system disk to a spare card.** Put a microSD card (at least the
+used space + 10 %, today about 13 GB) in a USB card reader on the Pi, then
+**Settings → Clone to SD card…**. Pick the card, type its name (for example
+`sdb`) and press **Erase card and clone**; the browser asks once more. The page
+shows each step, a progress bar and a log (about 10–15 minutes over USB 2).
+
+- The copy gets the same partition table (same disk id), and the same labels
+  and UUIDs (`system-boot`, `writable`). cmdline.txt and fstab boot by label, so
+  the copy starts when it replaces the original card in the Pi's slot.
+- Files are copied with rsync while the Pi keeps running (owners, modes, links,
+  ACLs, xattrs); `/proc /sys /dev /run /tmp /mnt /media` are left empty. Then
+  `e2fsck -n` and `fsck.vfat -n` check the copy.
+- **Take the copy out before rebooting.** With both cards in, both carry the same
+  labels, so Linux may mount the copy instead of the original.
+- With several cards in, each is listed with its USB port (`2-1` = on the Pi,
+  `4-2.4.1` = through a hub), reader model and serial, size and what is on it
+  now; none is picked for you. The start is refused if the card behind that
+  name changed after the list was shown (other card, reader or port: checked by
+  reader serial, port, size and a hash of the card's first 1 MiB).
+- The progress stays on the Pi: close the dialog or the page and reopen
+  **Clone to SD card…** later (from any browser) to see the step, bar and log.
+- Only removable or USB disks are offered, never the system disk. **Stop** ends
+  a running clone; the card is then incomplete and won't boot until a full clone.
+- Same access rule as the terminal (Cloudflare, cable or the Wi-Fi LAN).
+
 ### 10. Camera (USB webcam)
 
 Plug a UVC webcam into any USB port of the Pi. The main page shows a 5 fps live
@@ -737,6 +762,16 @@ wiring on the right. It updates every second from `GET /api/system`.
   so a loose wire or a floating address pin shows at once: temperature, the
   address it answered at, and how many of the last 60 probes it answered
   (hover the block for totals and every address seen).
+- **Fleet:** a **Fleet checker** block on the board (linked from the web
+  server) and, under the board, a **FLEET · SYSTEMS UNDER TEST** row with one
+  block per system on `/fleet` (5 per row, more rows as the list grows). Each
+  block shows the result (OK / WARN + flags, red for UNREACHABLE, AUTH FAILED,
+  HUNG …, blue while a check or HMC probe runs, with the step and `n/14`),
+  kind and address, "checked … ago" and, for BMC rows, the HMC (ping + Redfish
+  time). Dots run along its link while it is being checked; hover for the
+  first flag. Status changes and checks starting/finishing also appear in
+  **What just happened**. Shown only where `/fleet` itself opens (Cloudflare,
+  cable, Wi-Fi LAN); the systems do not count in the tester's own status line.
 - Click a block to open its page.
 
 ### 13. Terminal (https://pi-tester.dona-anna.com/terminal)
@@ -864,6 +899,7 @@ pi_tester/
   agent_tools.py  the agent's bench tools
   system_view.py  /system page data (/api/system)
   wifi_setup.py   Wi-Fi setup mode: setup network, captive page, DNS
+  clone.py        Settings -> clone the system disk to a card in a USB reader
   terminal.py     web terminal: shared tmux session over a WebSocket
   fleet_web.py    /fleet page: workbook upload/download, health check, reports
   web_server.py   REST API, WebSocket consoles, UART streams (aiohttp)

@@ -199,6 +199,7 @@ const NODES = {
   psu:     {x:R, y:460, w:275, h:168, t:'PSU simulator', href:'/', art:true},
   uartdev: {x:R, y:640, w:275, h:118, t:'USB-serial adapters', href:'/', art:true},
   camdev:  {x:R, y:770, w:275, h:92,  t:'USB camera', href:'/camera'},
+  fleet:   {x:840, y:725, w:210, h:120, t:'Fleet checker', href:'/fleet'},
 };
 // [from, side, to, side, which way "forward" goes: 'in' = toward the Pi, 'out' = away from it]
 const EDGES = {
@@ -222,9 +223,10 @@ const EDGES = {
   'i2c-psu':      ['i2c','r','psu','l','out'],
   'uart-uartdev': ['uart','r','uartdev','l','out'],
   'cam-camdev':   ['cam','r','camdev','l','out'],
+  'web-fleet':    ['web','r','fleet','l','out'],
 };
 const BUBBLE = {'lan-eth0':.45, 'wifiap-wlan0':.45, 'i2c-psu':.55, 'uart-uartdev':.5, 'cam-camdev':.5, 'llm-agent':.3};
-const SPREAD = {web_r:[-55,-20,20,55], web_l:[-50,0,50], i2c_r:[-40,0,40]};
+const SPREAD = {web_r:[-60,-30,0,30,60], web_l:[-50,0,50], i2c_r:[-40,0,40]};
 
 function anchor(n, side, o){
   return side === 'r' ? [n.x + n.w, n.y + n.h/2 + o] : side === 'l' ? [n.x, n.y + n.h/2 + o]
@@ -252,14 +254,35 @@ let ui;
 const hist = {cpu:[], temp:[], mem:[], load:[], eth:[], wifi:[]};
 const MAXDOTS = 5;
 
+// fleet systems: one block each in rows under the board (ids fl:0, fl:1, ...)
+const FL_Y = 915, FL_W = 262, FL_H = 132, FL_GAP = 14, FL_PER_ROW = 5;
+let fleetNames = [], fleetNodesKey = null;
+function syncFleetNodes(f){
+  const names = f && !f.hidden ? f.systems.map(m => m.name) : [];
+  const key = names.join('\u0000');
+  if (key === fleetNodesKey) return;
+  fleetNodesKey = key; fleetNames = names;
+  for (const id of Object.keys(NODES)) if (id.startsWith('fl:')) delete NODES[id];
+  for (const id of Object.keys(EDGES)) if (id.startsWith('fleet-fl:')) delete EDGES[id];
+  names.forEach((name, i) => {
+    const row = Math.floor(i / FL_PER_ROW), col = i % FL_PER_ROW;
+    NODES['fl:' + i] = {x:L + col * (FL_W + FL_GAP), y:FL_Y + row * (FL_H + 18), w:FL_W, h:FL_H, t:name, href:'/fleet'};
+    EDGES['fleet-fl:' + i] = ['fleet','b','fl:' + i,'t','out'];
+  });
+  build();
+}
+
 function build(){
   svg.innerHTML = '';
+  const rows = Math.ceil(fleetNames.length / FL_PER_ROW);
+  svg.setAttribute('viewBox', `8 14 1386 ${rows ? FL_Y - 14 + rows * (FL_H + 18) + 6 : 872}`);
   svg.classList.toggle('big', big);
   document.body.classList.toggle('big', big);
   $('sizeB').textContent = 'Text: ' + (big ? 'Large' : 'Normal');
   ui = {nodes:{}, edges:{}, tiles:{}};
   el('text', {x:L, y:big ? 170 : 172, class:'coltitle'}, null, 'NETWORK SIDE');
   el('text', {x:R, y:132, class:'coltitle'}, null, 'WIRED TO THE BENCH');
+  if (fleetNames.length) el('text', {x:L, y:FL_Y - 12, class:'coltitle'}, null, 'FLEET · SYSTEMS UNDER TEST');
   el('rect', {x:P, y:20, width:790, height:860, rx:18, class:'board'});
   ui.boardTitle = el('text', {x:P + 20, y:46, class:'boardtitle'}, null, 'Raspberry Pi 5');
   TILES.forEach((k, i) => {
@@ -448,6 +471,7 @@ function clearLog(){ logEl.innerHTML = ''; }
 let prev = null;
 function diff(s){
   if (!prev){ log('Live view started', 'ok'); return; }
+  diffFleet(prev.fleet, s.fleet);
   const p = prev, ch = (a, b, txt, lvl, node) => { if (a !== b) log(txt, lvl, node); };
   ch(p.net.eth.link, s.net.eth.link, s.net.eth.link ? 'Network cable connected' : 'Network cable unplugged or link lost', s.net.eth.link ? 'ok' : 'bad', 'eth0');
   ch(p.net.wifi.connected, s.net.wifi.connected, s.net.wifi.connected ? 'Wi-Fi connected' : 'Wi-Fi disconnected', s.net.wifi.connected ? 'ok' : 'warn', 'wlan0');
@@ -492,9 +516,81 @@ function diff(s){
   if ((s.host.throttled & 0xF) !== (p.host.throttled & 0xF)) log(s.host.throttled & 0xF ? 'Pi is slowing down (power or heat)' : 'Pi runs at full speed again', s.host.throttled & 0xF ? 'bad' : 'ok');
 }
 
+// ---------- fleet blocks ----------
+const BADST = ['UNREACHABLE', 'AUTH FAILED', 'HOST KEY CHANGED', 'ERROR', 'HUNG', 'CONSOLE LOGIN', 'NO OUTPUT'];
+function agoF(sec){ sec = Math.max(0, Math.round(sec));
+  return sec < 60 ? `${sec} s` : sec < 3600 ? `${Math.floor(sec / 60)} min` : sec < 172800 ? `${Math.floor(sec / 3600)} h` : `${Math.floor(sec / 86400)} d`; }
+const busyA = a => a && ['active', 'queued'].includes(a.state);
+function fleetState(m){
+  if (busyA(m.act)) return 'act';
+  return m.status === 'OK' ? 'ok' : m.status === 'WARN' ? 'warn' : BADST.includes(m.status) ? 'bad' : 'idle';
+}
+function hmcLine(h){
+  if (!h) return '';
+  if (h.bmc && h.bmc !== 'OK') return 'HMC ? (BMC not reachable)';
+  return h.redfish ? `HMC ✓ Redfish ${h.ms != null ? h.ms + ' ms' : 'ok'}` : h.ping ? 'HMC pings, no Redfish' : h.ping === false ? 'HMC ✕ not answering' : 'HMC ?';
+}
+function renderFleetNodes(f){
+  syncFleetNodes(f);
+  if (!f || f.hidden){
+    setNode('fleet', 'idle', 'hidden here', ['open this page through', 'Cloudflare, the cable', 'or the Pi\'s Wi-Fi']);
+    setEdge('web-fleet', '', 0, 0);
+    return;
+  }
+  const n = {ok: 0, warn: 0, bad: 0, act: 0, idle: 0};
+  let newest = 0;
+  f.systems.forEach((m, i) => {
+    const st = fleetState(m), a = m.act, id = 'fl:' + i;
+    n[st]++;
+    const t = m.last ? new Date(m.last.replace(' ', 'T')) : null;
+    if (t && !isNaN(t)) newest = Math.max(newest, t.getTime());
+    const checked = t && !isNaN(t) ? `checked ${agoF((Date.now() - t) / 1000)} ago` : 'not checked yet';
+    let word, lines;
+    if (st === 'act'){
+      word = a.state === 'queued' ? 'queued' : a.kind === 'hmc-probe' ? 'probing HMC'
+        : `checking${a.stage === 'checks' && a.n ? ` ${a.i || 0}/${a.n}` : ' · ' + (a.stage || '')}`;
+      lines = ['!' + `${m.kind} · ${m.addr}`, a.step || '', hmcLine(m.hmc)];
+    } else {
+      word = (m.status || 'not checked') + (m.flags ? ` · ${m.flags} flag${m.flags > 1 ? 's' : ''}` : '');
+      lines = ['!' + `${m.kind} · ${m.addr}`, checked, hmcLine(m.hmc) || m.flag1];
+    }
+    if (ui.nodes[id]) setNode(id, st, word, lines.filter(x => x !== undefined),
+      [`${m.kind} ${m.addr}` + (m.server ? ` · server ${m.server}` : ''), checked, hmcLine(m.hmc),
+       m.flag1 ? 'first flag: ' + m.flag1 : '', m.problem ? 'problem: ' + m.problem : ''].filter(Boolean).join('\n'));
+    if (ui.edges['fleet-' + id])
+      setEdge('fleet-' + id, st === 'bad' ? 'bad' : st === 'idle' ? '' : 'ok', st === 'act' ? 6 : 0, st === 'act' ? 6 : 0,
+        '', st === 'act' ? 'checking over SSH now' : st === 'bad' ? m.status : 'SSH, read-only');
+  });
+  const total = f.systems.length;
+  setNode('fleet', n.act ? 'act' : total ? 'ok' : 'idle',
+    n.act ? `working on ${n.act}` : total ? 'idle' : 'no systems',
+    total ? ['!' + `${total} system${total > 1 ? 's' : ''}: ${n.ok} OK · ${n.warn} warn · ${n.bad} down`,
+             'SSH from the Pi, read-only', newest ? `last check ${agoF((Date.now() - newest) / 1000)} ago` : 'never checked']
+          : ['add systems on the Fleet page']);
+  setEdge('web-fleet', total ? 'ok' : '', n.act ? 4 : 0, n.act ? 4 : 0);
+}
+function diffFleet(p, s){
+  if (!p || !s || p.hidden || s.hidden) return;
+  const old = Object.fromEntries(p.systems.map(m => [m.name, m]));
+  const busy = a => a && ['active', 'queued'].includes(a.state);
+  const hs = h => !h ? '' : h.redfish ? 'up' : h.ping ? 'noredfish' : h.ping === false ? 'down' : '?';
+  const HS = {up: 'answers Redfish', noredfish: 'pings but no Redfish', down: 'does not answer', '?': 'state unknown'};
+  for (const m of s.systems){
+    const o = old[m.name];
+    if (!o){ log(`Fleet: ${m.name} added`, ''); continue; }
+    if (!busy(o.act) && busy(m.act)) log(`Fleet: ${m.name} ${m.act.kind === 'hmc-probe' ? 'HMC probe' : m.act.kind || 'work'} started`, '');
+    if (busy(o.act) && !busy(m.act) && m.act) log(`Fleet: ${m.name} ${m.act.kind || 'work'} finished: ${m.act.result || m.act.state}`,
+      ['OK', 'HMC OK', 'exit 0'].includes(m.act.result) ? 'ok' : m.act.result === 'WARN' ? 'warn' : 'bad');
+    if (o.status !== m.status && m.status) log(`Fleet: ${m.name} is now ${m.status}`, m.status === 'OK' ? 'ok' : m.status === 'WARN' ? 'warn' : 'bad');
+    if (hs(o.hmc) !== hs(m.hmc) && hs(m.hmc)) log(`Fleet: ${m.name} HMC ${HS[hs(m.hmc)]}`, hs(m.hmc) === 'up' ? 'ok' : hs(m.hmc) === 'down' ? 'bad' : 'warn');
+  }
+  for (const name in old) if (!s.systems.some(m => m.name === name)) log(`Fleet: ${name} removed`, '');
+}
+
 // ---------- render ----------
 let pwmState = [], ledBase = [];
 function render(s){
+  syncFleetNodes(s.fleet);                           // rebuilds the diagram first if systems were added or removed
   const dt = prev ? Math.max(0.2, s.time - prev.time) : 1;
   const rate = (a, b) => prev ? Math.max(0, (a - b) / dt) : 0;
   const h = s.host, n = s.net, a = s.agent, c = s.camera, i2c = s.i2c;
@@ -623,6 +719,7 @@ function render(s){
 
   pwmState = s.pwm;
   ledBase = [s.gpio_out[0], s.gpio_out[1], s.gpio_in[0], s.gpio_in[1]];
+  renderFleetNodes(s.fleet);
   summary();
 }
 
@@ -631,6 +728,7 @@ function summary(){
   const bad = [], warn = [];
   for (const id in ui.nodes){
     const u = ui.nodes[id];
+    if (id.startsWith('fl:')) continue;              // machines under test: their own blocks, not the tester's status
     if (u.st === 'bad') bad.push(id); else if (u.st === 'warn') warn.push(id);
   }
   const el2 = $('summary'), items = $('sumItems');

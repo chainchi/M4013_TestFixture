@@ -68,6 +68,16 @@ button.q{padding:2px 7px;font-size:12px}
 body.dragging{user-select:none}
 #toast{position:fixed;right:16px;bottom:16px;padding:8px 12px;border-radius:6px;background:var(--bad);color:#fff;display:none}
 dialog{border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--fg);max-width:420px;width:92vw}
+#cdlg{max-width:560px}
+button.danger{background:var(--bad);border-color:var(--bad)}
+button:disabled{opacity:.45;cursor:not-allowed}
+.ctg{display:block;border:1px solid var(--line);border-radius:6px;padding:8px;margin:6px 0;cursor:pointer}
+.ctg.no{opacity:.55;cursor:not-allowed}
+.ctg small{display:block;color:var(--mut)}
+.cwarn{border-left:3px solid var(--bad);padding:6px 10px;margin:8px 0;font-size:13px}
+.cbar{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin:8px 0}
+.cbar i{display:block;height:100%;width:0;background:var(--acc);transition:width .5s}
+#cLog{max-height:150px;overflow:auto;font:12px/1.4 ui-monospace,monospace;background:var(--bg);padding:6px;border-radius:6px;white-space:pre-wrap}
 @media (max-width:480px){main{padding:12px 8px}}
 /* Laptop/desktop: everything on one screen. Controls in one row on top, the
  * tabbed console and the camera share the bottom row; long outputs scroll
@@ -199,9 +209,32 @@ dialog{border:1px solid var(--line);border-radius:8px;background:var(--card);col
     <div class="row"><label>User</label><input id="sUser" autocomplete="off"></div>
     <div class="row"><label>Password</label><input id="sPass" type="password" autocomplete="new-password" placeholder="unchanged"></div>
     <p style="color:var(--mut);font-size:12px">Network changes take effect after reboot.</p>
+    <hr>
+    <div class="row"><label>System disk</label>
+      <button type="button" class="sec" onclick="openClone()">Clone to SD card…</button></div>
     <div class="row">
       <button type="button" onclick="saveSettings(false)">Save</button>
       <button type="button" onclick="saveSettings(true)">Save &amp; reboot</button>
+      <button class="sec" value="cancel">Close</button></div>
+  </form>
+</dialog>
+<dialog id="cdlg">
+  <form method="dialog">
+    <h2>Clone the system disk</h2>
+    <p id="cSrc" style="font-size:13px"></p>
+    <div id="cPick">
+      <div id="cTargets"></div>
+      <div class="cwarn" id="cWarn" style="display:none"></div>
+      <div class="row"><label>Confirm</label><input id="cConf" class="mono" autocomplete="off" placeholder="type the card name" oninput="cloneReady()"></div>
+    </div>
+    <div id="cRun" style="display:none">
+      <div id="cStep" style="font-size:13px"></div>
+      <div class="cbar"><i id="cBar"></i></div>
+      <div id="cLog"></div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button type="button" class="danger" id="cGo" onclick="cloneStart()" disabled>Erase card and clone</button>
+      <button type="button" class="sec" id="cStop" onclick="cloneCancel()" style="display:none">Stop</button>
       <button class="sec" value="cancel">Close</button></div>
   </form>
 </dialog>
@@ -426,6 +459,55 @@ async function saveSettings(reboot){
   if(reboot){await api('/api/reboot',{});toast('rebooting...');}
   $('dlg').close(); refresh();
 }
+
+/* ---------- system clone ---------- */
+let cSel=null, cSelId=null, cTimer=null, cData=null;
+const gb=b=>(b/1e9).toFixed(1)+' GB';
+function escH(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+async function openClone(){
+  $('dlg').close(); cSel=null; $('cConf').value='';
+  $('cdlg').showModal(); await cloneLoad();
+  clearInterval(cTimer); cTimer=setInterval(()=>{ if($('cdlg').open) cloneLoad(); else clearInterval(cTimer); },1500);
+}
+async function cloneLoad(){
+  let d; try{ d=await api('/api/clone'); }catch(e){ return; }
+  cData=d; const s=d.source, st=d.status;
+  $('cSrc').innerHTML=`From <b>${escH(s.dev)}</b> (${gb(s.size)}, ${gb(s.used)} used: `+
+    s.parts.map(p=>`${escH(p.label||p.name)} ${escH(p.fstype||'')}`).join(', ')+`). The copy gets the same partitions, labels and UUIDs, so it boots when it replaces this card.`;
+  const busy=st.running, show=busy||st.done||st.error;
+  $('cPick').style.display=busy?'none':''; $('cRun').style.display=show?'':'none';
+  $('cStop').style.display=busy?'':'none'; $('cGo').style.display=busy?'none':'';
+  if(show){
+    $('cStep').innerHTML=st.error?`<b style="color:var(--bad)">Failed:</b> ${escH(st.error)}`:
+      st.done?`<b style="color:var(--ok)">Done.</b> Take the copy out before rebooting: both cards carry the same labels and UUIDs, so with both in, Linux may start from the copy.`:
+      `<b>${escH(st.step)}</b> · ${st.pct}% · ${Math.round((Date.now()/1000-st.started)/60)} min`;
+    $('cBar').style.width=st.pct+'%'; $('cBar').style.background=st.error?'var(--bad)':st.done?'var(--ok)':'';
+    const L=$('cLog'), end=L.scrollTop+L.clientHeight>=L.scrollHeight-4; L.textContent=st.log.join(String.fromCharCode(10)); if(end) L.scrollTop=L.scrollHeight;
+  }
+  if(busy) return;
+  if(!d.targets.length){ $('cTargets').innerHTML='<p style="color:var(--mut)">No card reader with a card found. Put the spare card in a USB reader.</p>'; }
+  else $('cTargets').innerHTML=d.targets.map(t=>`<label class="ctg ${t.ok?'':'no'}"><input type="radio" name="ctg" value="${escH(t.dev)}" ${t.ok?'':'disabled'} ${cSel===t.dev?'checked':''} onchange="cSel=this.value;cSelId=this.dataset.id;cloneReady()" data-id="${escH(t.id)}">
+    <b>${escH(t.name)}</b> · ${escH(t.model||'card reader')} · ${t.size?gb(t.size):'empty'} ${t.ok?'':`<span style="color:var(--bad)">(${escH(t.why)})</span>`}
+    <small>USB port ${escH(t.port||'?')}${t.hub?' (through a hub)':' (on the Pi)'} · reader serial ${escH(t.serial||'none')}</small>
+    <small>now on it: ${t.parts.length?t.parts.map(p=>`${escH(p.name)} ${escH(p.label||'')} ${escH(p.fstype||'?')} ${gb(p.size)}`).join(' · '):'no partitions Linux can read'}${t.mounted.length?` · mounted at ${escH(t.mounted.join(', '))} (will be unmounted)`:''}</small></label>`).join('');
+  cloneReady();
+}
+function cloneReady(){
+  let t=cData&&cData.targets.find(x=>x.dev===cSel);
+  if(t&&t.id!==cSelId){ cSel=cSelId=null; t=null; $('cConf').value=''; toast('the selected card changed: pick it again'); }
+  const name=t?t.name:'';
+  $('cWarn').style.display=t?'':'none';
+  $('cConf').placeholder=t?`type ${name} here`:'pick a card above first';
+  if(t) $('cWarn').innerHTML=`Everything on <b>${escH(name)}</b> (${gb(t.size)}) will be erased. To confirm, type its name <b class="mono">${escH(name)}</b> (the bold word at the start of the card's row) in the box below.`;
+  $('cGo').disabled=!(t&&$('cConf').value.trim()===name);
+}
+async function cloneStart(){
+  const t=cData.targets.find(x=>x.dev===cSel); if(!t) return;
+  if(!confirm(`Erase ${t.name} (${t.model}, ${gb(t.size)}) and copy the whole system to it?`)) return;
+  const r=await api('/api/clone/start',{dev:t.dev,id:t.id,confirm:$('cConf').value.trim()});
+  if(r.ok){ toast('clone started'); cloneLoad(); }
+}
+async function cloneCancel(){ await api('/api/clone/cancel',{}); cloneLoad(); }
 
 /* ---------- camera ---------- */
 /* low-rate preview; the camera only runs while some page is watching */

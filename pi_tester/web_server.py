@@ -9,7 +9,7 @@ import time
 
 from aiohttp import WSMsgType, web
 
-from . import agent, camera, config, fleet_web, i2c_ctrl, io_ctrl, net, redfish, settings, system_view, terminal, uart_hub, wifi_setup
+from . import agent, camera, clone, config, fleet_web, i2c_ctrl, io_ctrl, net, redfish, settings, system_view, terminal, uart_hub, wifi_setup
 
 WS_CHUNK = 4096
 PUMP_PERIOD_S = 0.03
@@ -371,6 +371,42 @@ async def h_settings_set(req):
     return result()
 
 
+# ---------- system clone ----------
+# Erases a card and writes the whole system to it: same access rule as the terminal.
+
+
+def _clone_guard(req):
+    if not terminal.allowed(req):
+        raise web.HTTPForbidden(text="system clone: only through Cloudflare, the Ethernet cable or the Pi's Wi-Fi LAN")
+
+
+async def h_clone_get(req):
+    _clone_guard(req)
+    src, tg = await asyncio.gather(asyncio.to_thread(clone.source), asyncio.to_thread(clone.targets))
+    return web.json_response({"source": src, "targets": tg, "status": clone.status()},
+                             headers={"Cache-Control": "no-store"})
+
+
+async def h_clone_start(req):
+    """JSON {dev: "/dev/sdb", id: "...", confirm: "sdb"}: confirm must be the disk's short name and
+    id the card identity from GET /api/clone (refused if the card was swapped since)."""
+    _clone_guard(req)
+    j = await read_json(req)
+    dev = str(j.get("dev") or "")
+    if not dev or j.get("confirm") != os.path.basename(dev):
+        return result(ValueError("type the card's name (for example sdb) to confirm"))
+    try:
+        await asyncio.to_thread(clone.start, dev, str(j.get("id") or ""), terminal._who(req))
+    except (ValueError, OSError, RuntimeError) as e:
+        return result(e)
+    return result()
+
+
+async def h_clone_cancel(req):
+    _clone_guard(req)
+    return result() if clone.cancel() else result(ValueError("no clone is running"))
+
+
 async def h_reboot(req):
     asyncio.get_running_loop().call_later(0.5, subprocess.Popen, ["systemctl", "reboot"])
     return result()
@@ -415,6 +451,9 @@ def main():
         web.get("/api/settings", h_settings_get),
         web.post("/api/settings", h_settings_set),
         web.post("/api/reboot", h_reboot),
+        web.get("/api/clone", h_clone_get),
+        web.post("/api/clone/start", h_clone_start),
+        web.post("/api/clone/cancel", h_clone_cancel),
         web.get("/ws", h_ws),
         *agent.ROUTES,
         *system_view.ROUTES,

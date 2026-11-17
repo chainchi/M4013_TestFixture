@@ -28,6 +28,9 @@ tester speaks to the DUT (see `/api/redfish` below).
 | GET  | `/api/uart/stream?port=0[&history=1]` | – | Live UART output, never ends (`curl -N`); max 4 at once |
 | POST | `/api/redfish` | `{"method":"GET","path":"/redfish/v1/Systems","body":""}` | Send a Redfish request to the DUT, returns `{"status":200,"body":"..."}` |
 | GET/POST | `/api/settings` | see web page | Station settings (IP, DUT host, credentials, Wi-Fi) |
+| GET | `/api/clone` | - | System disk, cards it can be cloned to, clone progress and log |
+| POST | `/api/clone/start` | `{"dev":"/dev/sdb","confirm":"sdb"}` | Erase that card and clone the system disk to it |
+| POST | `/api/clone/cancel` | `{}` | Stop a running clone |
 | GET  | `/api/camera` | – | USB camera: `present`, `name`, `format`, `running`, `width`, `height`, `fps`, `viewers` |
 | GET  | `/api/camera/stream[?fps=5]` | – | Live MJPEG video (`<img src=...>`), optional rate cap 1–30; max 4 at once |
 | GET  | `/api/camera/snapshot` | – | One JPEG frame (`curl -o pic.jpg`) |
