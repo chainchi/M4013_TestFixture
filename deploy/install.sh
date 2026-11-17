@@ -5,7 +5,7 @@ set -e
 cd "$(dirname "$0")/.."
 
 apt-get install -y -qq -o DPkg::Lock::Timeout=600 \
-    python3-aiohttp python3-libgpiod python3-smbus2 python3-serial python3-pil python3-numpy python3-venv     gpiod i2c-tools avahi-daemon iw hostapd
+    python3-aiohttp python3-libgpiod python3-smbus2 python3-serial python3-pil python3-numpy python3-venv python3-paramiko python3-openpyxl gpiod i2c-tools avahi-daemon iw hostapd
 
 # Venv for the agent's Claude SDK (Ubuntu's python3-anthropic is too old); it
 # still sees the apt packages above
@@ -49,12 +49,22 @@ print("settings seeded:", {k: v for k, v in s.items() if k != "wifi_pass"})
 EOF
 fi
 
+# Fleet debug tools for Claude Code on the Pi (the /fleet page uses them too);
+# the user's workbook and reports in ~/fleet are kept
+if [ -d tools/fleet ]; then
+    install -d -m 700 -o m4013pi -g m4013pi /home/m4013pi/fleet
+    install -m 755 -o m4013pi -g m4013pi tools/fleet/fleet.py tools/fleet/mkcper.py /home/m4013pi/fleet/
+    install -m 644 -o m4013pi -g m4013pi tools/fleet/CLAUDE.md /home/m4013pi/fleet/
+    [ -e /home/m4013pi/CLAUDE.md ] || install -m 644 -o m4013pi -g m4013pi tools/fleet/home-CLAUDE.md /home/m4013pi/CLAUDE.md
+fi
+
 # Shared tmux session used by the web terminal: mouse-wheel scrollback
 install -m 644 -o m4013pi -g m4013pi deploy/tmux.conf /home/m4013pi/.tmux.conf
 
-cp deploy/pi-tester.service /etc/systemd/system/
+cp deploy/pi-tester.service deploy/pi-tester-tmux.service /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable pi-tester >/dev/null 2>&1
+systemctl enable pi-tester pi-tester-tmux >/dev/null 2>&1
+systemctl start pi-tester-tmux
 systemctl restart pi-tester
 echo "pi-tester installed and started"
 [ -z "$REBOOT" ] || echo "config.txt changed: reboot to enable the I2C bus 1 and PWM pins"

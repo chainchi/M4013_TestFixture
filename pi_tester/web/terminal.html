@@ -19,6 +19,15 @@ button:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
 #st{font-weight:600}
 #st.ok{color:var(--ok)} #st.bad{color:var(--bad)}
 .hint{color:var(--mut);font-size:13px}
+nav{display:flex;align-items:center;gap:6px;padding:6px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.tab{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.tab button{border:0;border-radius:0;padding:4px 10px}
+.tab.on{border-color:var(--acc)}
+.tab.on .open{background:var(--acc);color:#fff}
+.tab .kill{color:var(--mut);padding:4px 8px;border-left:1px solid var(--line)}
+.tab .kill:hover,.tab .kill.sure{color:#fff;background:var(--bad)}
+.tab small{opacity:.75;margin-left:4px}
+#err{color:var(--bad);font-size:13px}
 #wrap{flex:1;min-height:0;background:var(--term);padding:6px 4px 4px 8px}
 #term{width:100%;height:100%}
 </style>
@@ -29,7 +38,7 @@ button:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
   <h1>Terminal</h1>
   <span id="st">connecting…</span>
   <span class="hint">shared session: Claude and anyone else on this page see and type into the same shell.
-    Scroll back with the mouse wheel or ▲/▼ (Shift+PgUp/PgDn); Shift+drag selects text.</span>
+    Scroll back with the mouse wheel or ▲/▼ (Shift+PgUp/PgDn). Drag to copy text.</span>
   <span class="sp"></span>
   <button id="up" title="Scroll back one page (Shift+PgUp)">▲</button>
   <button id="down" title="Scroll forward one page (Shift+PgDn); at the bottom it returns to the live screen">▼</button>
@@ -37,6 +46,7 @@ button:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
   <button id="bigger" title="Bigger text">A+</button>
   <button id="again" hidden>Reconnect</button>
 </header>
+<nav><span id="tabs"></span><button id="add" title="Open a new terminal (its own shell, not shared with Claude)">+ New terminal</button><span id="err"></span></nav>
 <div id="wrap"><div id="term"></div></div>
 <script src="/vendor/xterm.js"></script>
 <script src="/vendor/addon-fit.js"></script>
@@ -51,6 +61,10 @@ const fit = new FitAddon.FitAddon();
 term.loadAddon(fit);
 term.open($('term'));
 let ws;
+const SHARED = 'shared';
+let cur = decodeURIComponent(location.hash.slice(1)) || SHARED;   // the open terminal, kept in the URL
+let sessions = [];
+let armed = null, armTimer;          // terminal whose × was clicked once
 
 function status(text, cls){ $('st').textContent = text; $('st').className = cls || ''; }
 function sendSize(){
@@ -60,12 +74,84 @@ function sendSize(){
 function connect(){
   $('again').hidden = true;
   status('connecting…');
-  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/terminal');
-  ws.binaryType = 'arraybuffer';
-  ws.onopen = () => { status('connected', 'ok'); sendSize(); term.focus(); };
-  ws.onmessage = e => term.write(new Uint8Array(e.data));
-  ws.onclose = () => { status('disconnected', 'bad'); $('again').hidden = false; };
+  const sock = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host +
+                             '/ws/terminal?session=' + encodeURIComponent(cur));
+  ws = sock;
+  sock.binaryType = 'arraybuffer';
+  sock.onopen = () => { status('connected', 'ok'); sendSize(); term.focus(); };
+  sock.onmessage = e => term.write(new Uint8Array(e.data));
+  sock.onclose = async () => {
+    if (ws !== sock) return;                       // replaced by a switch
+    await refresh();
+    if (ws !== sock) return;                       // switched away while refreshing (e.g. after a kill)
+    if (cur !== SHARED && !sessions.some(s => s.name === cur)) { switchTo(SHARED); return; }   // it was killed
+    status('disconnected', 'bad'); $('again').hidden = false;
+  };
 }
+function switchTo(name){
+  cur = name;
+  history.replaceState(null, '', name === SHARED ? location.pathname : '#' + encodeURIComponent(name));
+  const old = ws; ws = null;
+  if (old) old.close();
+  term.reset();
+  connect();
+  render();
+}
+
+// Tabs: the shared terminal first, then t1, t2, ... (+ opens one, × kills one)
+async function api(method, path){
+  const r = await fetch('/api/terminal/sessions' + path, {method});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.status);
+  return j;
+}
+async function refresh(){
+  try { sessions = (await api('GET', '')).sessions; } catch (e) { return; }
+  render();
+}
+function render(){
+  const box = $('tabs'); box.textContent = '';
+  const list = sessions.some(s => s.name === cur) ? sessions : [...sessions, {name: cur, viewers: 0, shared: cur === SHARED}];
+  for (const s of list) {
+    const tab = document.createElement('span');
+    tab.className = 'tab' + (s.name === cur ? ' on' : '');
+    const open = document.createElement('button');
+    open.className = 'open';
+    open.textContent = s.shared ? 'shared (Claude)' : s.name;
+    if (s.viewers > 1) { const n = document.createElement('small'); n.textContent = `👁${s.viewers}`; open.appendChild(n); }
+    open.title = (s.shared ? 'Shared with Claude and pirun.sh. ' : '') + (s.command ? `Running: ${s.command}` : '');
+    open.onclick = () => { if (s.name !== cur) switchTo(s.name); else term.focus(); };
+    tab.appendChild(open);
+    if (!s.shared) {
+      const kill = document.createElement('button');
+      const sure = armed === s.name;                // kept across the 5 s re-render
+      kill.className = 'kill' + (sure ? ' sure' : ''); kill.textContent = sure ? 'Kill?' : '×';
+      kill.title = 'Kill this terminal (click twice)';
+      kill.onclick = async () => {
+        if (armed !== s.name) {                       // first click arms it for 4 s
+          armed = s.name; render();
+          clearTimeout(armTimer);
+          armTimer = setTimeout(() => { armed = null; render(); }, 4000);
+          return;
+        }
+        armed = null;
+        $('err').textContent = '';
+        try { await api('DELETE', '/' + encodeURIComponent(s.name)); } catch (e) { $('err').textContent = e.message; }
+        if (s.name === cur) switchTo(SHARED); else refresh();
+      };
+      tab.appendChild(kill);
+    }
+    box.appendChild(tab);
+  }
+  $('add').disabled = sessions.filter(s => !s.shared).length >= 8;
+}
+$('add').onclick = async () => {
+  $('err').textContent = '';
+  try { const r = await api('POST', ''); await refresh(); switchTo(r.name); }
+  catch (e) { $('err').textContent = e.message; }
+};
+setInterval(refresh, 5000);           // others may open or kill terminals too
+refresh();
 const enc = new TextEncoder();
 term.onData(d => { if (ws && ws.readyState === 1) ws.send(enc.encode(d)); });
 new ResizeObserver(() => sendSize()).observe($('wrap'));
@@ -78,7 +164,45 @@ function font(d){
 $('smaller').onclick = () => font(-2);
 $('bigger').onclick = () => font(2);
 $('again').onclick = connect;
-// tmux (deploy/tmux.conf) binds Shift+PgUp/PgDn to page through its history
+
+// Copying. A plain drag selects in tmux, which sends the text here as OSC 52
+// (set-clipboard in deploy/tmux.conf); a Shift+drag selects in the page and is
+// copied on release, or with Ctrl+C / Ctrl+Shift+C while text is selected.
+let copiedTimer;
+function toClipboard(text){
+  if (!text) return;
+  const done = () => {
+    status(`copied ${text.length} chars`, 'ok');
+    clearTimeout(copiedTimer);
+    copiedTimer = setTimeout(() => { if (ws && ws.readyState === 1) status('connected', 'ok'); }, 2500);
+  };
+  const fallback = () => {          // plain http (the cable) has no Clipboard API
+    const t = document.createElement('textarea');
+    t.value = text; t.style.position = 'fixed'; t.style.opacity = '0';
+    document.body.appendChild(t); t.select();
+    try { document.execCommand('copy') ? done() : status('copy failed', 'bad'); } catch (e) { status('copy failed', 'bad'); }
+    t.remove(); term.focus();
+  };
+  if (!(navigator.clipboard && window.isSecureContext)) return fallback();
+  let settled = false;                // Chrome can leave writeText pending (e.g. behind a permission prompt)
+  const once = f => () => { if (!settled) { settled = true; f(); } };
+  navigator.clipboard.writeText(text).then(once(done), once(fallback));
+  setTimeout(once(fallback), 800);
+}
+term.parser.registerOscHandler(52, data => {
+  const b64 = data.slice(data.indexOf(';') + 1);
+  if (b64 && b64 !== '?') {
+    try { toClipboard(new TextDecoder().decode(Uint8Array.from(atob(b64), c => c.charCodeAt(0)))); } catch (e) {}
+  }
+  return true;
+});
+$('term').addEventListener('mouseup', () => setTimeout(() => { if (term.hasSelection()) toClipboard(term.getSelection()); }, 0));
+term.attachCustomKeyEventHandler(e => {
+  if (e.type === 'keydown' && e.ctrlKey && (e.key === 'c' || e.key === 'C') && term.hasSelection()) {
+    toClipboard(term.getSelection()); term.clearSelection(); return false;   // copy instead of sending ^C
+  }
+  return true;
+});// tmux (deploy/tmux.conf) binds Shift+PgUp/PgDn to page through its history
 function key(seq){ if (ws && ws.readyState === 1) ws.send(enc.encode(seq)); term.focus(); }
 $('up').onclick = () => key('\x1b[5;2~');
 $('down').onclick = () => key('\x1b[6;2~');

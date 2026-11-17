@@ -9,7 +9,7 @@ import time
 
 from aiohttp import WSMsgType, web
 
-from . import agent, camera, config, i2c_ctrl, io_ctrl, net, redfish, settings, system_view, terminal, uart_hub, wifi_setup
+from . import agent, camera, config, fleet_web, i2c_ctrl, io_ctrl, net, redfish, settings, system_view, terminal, uart_hub, wifi_setup
 
 WS_CHUNK = 4096
 PUMP_PERIOD_S = 0.03
@@ -420,6 +420,7 @@ def main():
         *system_view.ROUTES,
         *wifi_setup.ROUTES,
         *terminal.ROUTES,
+        *fleet_web.ROUTES,
         web.static("/vendor", os.path.join(os.path.dirname(__file__), "web", "vendor")),
     ])
     system_view.extra = lambda: {"console_pages": len(_ws_clients), "uart_streams": _streams,

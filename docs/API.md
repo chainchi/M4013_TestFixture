@@ -38,7 +38,18 @@ tester speaks to the DUT (see `/api/redfish` below).
 | GET  | `/api/wifi-setup` | – | `active`, `ap_ssid`, `ap_ip`, `clients`, `networks` (scan: `ssid`, `signal`, `secure`), `trying`, `last` (`ssid`, `ok`, `msg`, `time`), `known` |
 | POST | `/api/wifi-setup` | `{"ssid","password"}` or `{"action":"start"\|"stop"}` | Save a network (setup mode only; applied a few seconds later), or start/stop setup mode |
 | GET  | `/terminal` | – | Web terminal page; 403 unless through the Cloudflare tunnel (loopback) or the Ethernet link |
-| GET  | `/ws/terminal` | WebSocket | Shared tmux session `shared`: binary frames = keystrokes in / terminal output out; text `{"resize":[cols,rows]}`. Same access rule |
+| GET  | `/ws/terminal?session=<name>` | WebSocket | tmux session `<name>` (default `shared`, which is created if missing; others must exist, else 404): binary frames = keystrokes in / terminal output out; text `{"resize":[cols,rows]}`. Same access rule |
+| GET  | `/api/terminal/sessions` | – | `{"sessions":[{"name","viewers","created","command","shared"}], "max":8}`, shared first. Same access rule |
+| POST | `/api/terminal/sessions` | – | New terminal, named `t1`, `t2`, … → `{"name":"t1"}`; 409 when 8 extra terminals exist. Same access rule |
+| DELETE | `/api/terminal/sessions/<name>` | – | Kills that terminal and everything running in it → `{"ok":true}`; 409 for `shared`, 404 if missing. Same access rule |
+| GET  | `/fleet` | – | Fleet debug page: the system list as a form (add / edit / delete). Same access rule as the terminal (the list holds passwords) |
+| GET  | `/api/fleet` | – | `{"systems":[{name, ip, port, user, password: bool, access, profile, type, server, hmc, rack, stage, timeout, expected_*, problem, status, last, flags, cper, summary, flag_list[], error, seconds, report: bool}], "check":{running, started, output, names}, "choices", "hmc_default", "error"}`; passwords are never included. Same access rule |
+| POST | `/api/fleet/systems` | JSON `{old_name: NAME\|null, system: {...}, password?: str, clear_password?: bool}` | Add (`old_name` null) or change/rename a system; no `password` keeps the saved one. Validated by `fleet.py edit` → `{"ok":true,"name"}` or 400 `{"error"}`. Same access rule |
+| DELETE | `/api/fleet/systems/<name>` | – | Remove a system from the list → `{"ok":true}`; 400 if missing. Same access rule |
+| GET  | `/api/fleet/export` | – | The list with results as .xlsx, **without passwords**. Same access rule |
+| POST | `/api/fleet/check` | optional JSON `{names: [...]}` | Health check (all, or the named systems) in the background → `{"ok":true}`; 409 while one runs. Same access rule |
+| POST | `/api/fleet/hmc-probe/<name>` | – | BMC rows: through the BMC, ping the HMC and `GET /redfish/v1/` once → `{ping, http, ms, redfish, error}`; 502 `{"error"}` if the BMC cannot be reached; 409 while a probe of that row runs. The result is also kept for the page (`systems[].hmc_status`). Same access rule |
+| GET  | `/api/fleet/report/<name>` | – | Latest report of a system (text). Same access rule |
 | GET  | `/agent` | – | AI agent chat page |
 | POST | `/api/agent/message` | `{"text":"..."}` (`"wait":false` to only queue) | Ask the agent; returns `{"reply":"..."}` when the turn ends |
 | GET/POST | `/api/agent/config` | `{"profile":{"name","provider":"anthropic"\|"openai","base_url","api_key","model","effort"}}`, `{"active":name}`, `{"delete":name}` | Model profiles (GET never returns keys) |

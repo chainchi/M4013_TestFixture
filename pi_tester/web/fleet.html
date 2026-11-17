@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fleet Debug</title>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--fg:#1c1f24;--mut:#6b7280;--line:#dde0e5;--acc:#2563eb;--ok:#15803d;--warn:#b45309;--bad:#b91c1c;--in:#fff}
+@media (prefers-color-scheme:dark){:root{--bg:#14161a;--card:#1c1f25;--fg:#e6e8eb;--mut:#9aa1ab;--line:#2c3038;--acc:#5b8cff;--ok:#4ade80;--warn:#fbbf24;--bad:#f87171;--in:#14161a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,Segoe UI,Arial,sans-serif}
+header{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+header h1{font-size:18px;margin:0}
+a{color:var(--acc)}
+a.back{color:var(--fg);text-decoration:none}
+main{max-width:1640px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px 16px;margin-bottom:14px}
+.card h2{font-size:16px;margin:0 0 8px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+button,.btn{font:inherit;cursor:pointer;color:var(--fg);background:transparent;border:1px solid var(--line);border-radius:6px;padding:6px 12px;text-decoration:none;display:inline-block}
+button.primary{background:var(--acc);border-color:var(--acc);color:#fff}
+button.danger{border-color:var(--bad);color:var(--bad)}
+button.sm{padding:2px 8px;font-size:13px}
+button:disabled{opacity:.5;cursor:default}
+.mut{color:var(--mut);font-size:13px}
+.msg.bad{color:var(--bad)} .msg.ok{color:var(--ok)}
+.tbl{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-weight:600;color:var(--mut);white-space:nowrap}
+td.acts{white-space:nowrap}
+tr.sel td{background:rgba(37,99,235,.10)}
+.st{font-weight:600;white-space:nowrap}
+.st.OK{color:var(--ok)} .st.WARN{color:var(--warn)}
+.st.UNREACHABLE,.st[class*="FAILED"],.st[class*="CHANGED"],.st.ERROR,.st.NO-OUTPUT,.st.HUNG,.st[class*="LOGIN"]{color:var(--bad)}
+ul.flags{margin:2px 0 0;padding-left:18px;color:var(--warn);font-size:13px}
+pre{white-space:pre-wrap;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:10px;max-height:60vh;overflow:auto;font-size:13px}
+code{font-size:13px}
+form .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px 14px}
+form label{display:flex;flex-direction:column;font-size:13px;color:var(--mut);gap:3px}
+form label.wide{grid-column:1/-1}
+form input,form select,form textarea{font:inherit;font-size:14px;color:var(--fg);background:var(--in);border:1px solid var(--line);border-radius:6px;padding:5px 8px}
+form input:invalid{border-color:var(--bad)}
+form fieldset{border:1px solid var(--line);border-radius:6px;margin:12px 0 0;padding:8px 12px 12px}
+form legend{font-size:13px;color:var(--mut);padding:0 4px}
+button.more{margin-top:3px;border:none;color:var(--acc);padding:0}
+.req::after{content:" *";color:var(--bad)}
+/* live activity per system */
+td.act{min-width:190px}
+.pipe{display:flex;align-items:center;gap:0;height:14px}
+.nd{width:10px;height:10px;border-radius:50%;background:var(--line);flex:none;position:relative}
+.nd.done{background:var(--ok)}
+.nd.warn{background:var(--warn)}
+.nd.err{background:var(--bad)}
+.nd.active{background:var(--acc);animation:pulse 1.2s ease-out infinite}
+.ln{width:18px;height:2px;background:var(--line);flex:none}
+.ln.done{background:var(--ok)}
+.ln.flow{background:linear-gradient(90deg,var(--ok) 0%,var(--acc) 50%,var(--line) 50%);background-size:200% 100%;animation:flow 1s linear infinite}
+.pipe.queued .nd{animation:breathe 1.6s ease-in-out infinite}
+.pipe.old{opacity:.55}
+.bar{height:4px;width:130px;background:var(--line);border-radius:2px;overflow:hidden;margin-top:5px}
+.bar i{display:block;height:100%;width:0;background-color:var(--acc);transition:width .6s ease;
+  background-image:linear-gradient(45deg,rgba(255,255,255,.35) 25%,transparent 25%,transparent 50%,rgba(255,255,255,.35) 50%,rgba(255,255,255,.35) 75%,transparent 75%);
+  background-size:8px 8px;animation:stripes .7s linear infinite}
+.lab{font-size:12px;color:var(--mut);max-width:240px;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lab b{font-weight:600;color:var(--fg)}
+.lab .r-OK{color:var(--ok)} .lab .r-WARN{color:var(--warn)} .lab .r-bad{color:var(--bad)}
+.spin{display:inline-block;width:10px;height:10px;border:2px solid var(--acc);border-right-color:transparent;border-radius:50%;
+  animation:spin .8s linear infinite;vertical-align:-1px;margin-right:4px}
+#live{display:inline-flex;align-items:center;gap:6px;font-size:13px}
+/* HMC indicator (BMC rows) */
+.hmc{display:flex;align-items:center;gap:6px;margin-top:6px;font-size:12px;color:var(--mut);white-space:nowrap}
+.hmc .tag{font-weight:600;color:var(--fg);font-size:11px;letter-spacing:.04em}
+.led{width:9px;height:9px;border-radius:50%;background:var(--line);flex:none;position:relative}
+.led.ok{background:var(--ok)} .led.warn{background:var(--warn)} .led.bad{background:var(--bad)}
+.led.ok::after{content:"";position:absolute;inset:-3px;border-radius:50%;border:2px solid var(--ok);opacity:0;animation:beat 2.4s ease-out infinite}
+.led.probing{background:var(--acc);animation:pulse 1.2s ease-out infinite}
+.hmc .ms{font-variant-numeric:tabular-nums}
+.hmc button{border:none;padding:0 2px;font-size:13px;color:var(--acc);background:none;cursor:pointer;line-height:1}
+@keyframes beat{0%{transform:scale(.6);opacity:.8}70%{transform:scale(1.4);opacity:0}100%{opacity:0}}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(37,99,235,.65)}80%{box-shadow:0 0 0 7px rgba(37,99,235,0)}100%{box-shadow:0 0 0 0 rgba(37,99,235,0)}}
+@keyframes breathe{50%{opacity:.3}}
+@keyframes flow{from{background-position:100% 0}to{background-position:0 0}}
+@keyframes stripes{from{background-position:0 0}to{background-position:8px 0}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.led.ok::after,.led.probing,.nd.active,.pipe.queued .nd,.ln.flow,.bar i,.spin{animation:none}}
+</style>
+</head>
+<body>
+<header>
+  <a class="back" href="/">← Test host</a>
+  <h1>Fleet debug</h1>
+  <span class="mut">Systems (DUTs) → SSH health check and log survey → Claude on the Pi explains</span>
+</header>
+<main>
+  <div class="card">
+    <div class="row">
+      <button class="primary" id="add">+ Add system</button>
+      <button id="check">Run health check on all</button>
+      <a class="btn" href="/api/fleet/export">Download as Excel (no passwords)</a>
+      <span id="live"></span><span id="cst" class="mut"></span>
+      <span id="msg" class="msg"></span>
+    </div>
+    <p class="mut">The list is kept on the Pi and holds passwords: this page opens only through Cloudflare or the Ethernet cable,
+      and passwords are never shown again after saving. For the analysis open the <a href="/terminal">Terminal</a> (shared tab)
+      and ask Claude, e.g. <code>debug the systems in the fleet list</code>.</p>
+  </div>
+
+  <div class="card" id="formcard" hidden>
+    <h2 id="ftitle">Add system</h2>
+    <form id="form" autocomplete="off">
+      <div class="grid">
+        <label class="req">Name<input name="name" required maxlength="40" pattern="[A-Za-z0-9_.\-]+" placeholder="tray07-bmc"></label>
+        <label class="req">IP / host<input name="ip" required maxlength="253" pattern="[A-Za-z0-9_.:\-]+" placeholder="192.168.1.16"></label>
+        <label>Port<input name="port" type="number" min="1" max="65535" placeholder="22"></label>
+        <label>User<input name="user" maxlength="60" placeholder="root"></label>
+        <label>Password<input name="password" type="password" maxlength="200" autocomplete="new-password" id="pw"></label>
+        <label id="clearlbl" hidden><span><input type="checkbox" name="clear_password"> remove the saved password</span></label>
+        <label>Type<select name="type" data-choices="type"></select></label>
+        <label>Profile<select name="profile" data-choices="profile"></select></label>
+        <label>Access<select name="access" data-choices="access"></select></label>
+        <label>Server (tray label)<input name="server" maxlength="60" placeholder="tray-07"></label>
+        <label>HMC IP (BMC rows)<input name="hmc" maxlength="253" id="hmc"></label>
+      </div>
+      <fieldset><legend>Optional: expectations and location</legend>
+        <div class="grid">
+          <label>Stage<select name="stage" data-choices="stage"></select></label>
+          <label>Rack / slot<input name="rack" maxlength="60" placeholder="R3-U12"></label>
+          <label>Timeout per command (s)<input name="timeout" type="number" min="1" max="3600" placeholder="30 ssh / 300 console"></label>
+          <label>Expected GPUs<input name="expected_gpus" type="number" min="0" max="64"></label>
+          <label>Expected PCIe<input name="expected_pcie" maxlength="60" placeholder="Gen6 x16"></label>
+          <label>Expected NVLink<select name="expected_nvlink" data-choices="expected_nvlink"></select></label>
+          <label>Expected FW<input name="expected_fw" maxlength="60" placeholder="0.4.00"></label>
+        </div>
+      </fieldset>
+      <div class="grid" style="margin-top:10px">
+        <label class="wide">Problem (what is wrong, optional)<textarea name="problem" rows="2" maxlength="500"></textarea></label>
+      </div>
+      <p class="mut">BMC rows (Type bmc or Profile bmc-openbmc) also read the HMC behind the BMC, through the BMC (Redfish GET only).
+        Access console: SSH lands on a serial console (e.g. a GPU host behind its BMC, port 22); commands are typed slowly, minutes per system.</p>
+      <div class="row">
+        <button class="primary" type="submit" id="save">Save</button>
+        <button type="button" id="cancel">Cancel</button>
+        <span id="fmsg" class="msg"></span>
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Systems <span class="mut" id="count"></span></h2>
+    <div class="tbl"><table>
+      <thead><tr><th>Name</th><th>Address</th><th>Kind</th><th>Activity</th><th>User</th><th>Password</th><th>Status</th><th>Last check</th><th>Problem</th><th>Flags / summary</th><th></th></tr></thead>
+      <tbody id="rows"><tr><td colspan="11" class="mut">loading…</td></tr></tbody>
+    </table></div>
+  </div>
+
+  <div class="card" id="repcard" hidden>
+    <h2 id="reptitle">Report</h2>
+    <pre id="rep"></pre>
+  </div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let systems = [], editing = null, armed = null, armTimer = null, filled = false, running = false;
+function msg(el, t, cls){ $(el).textContent = t; $(el).className = 'msg ' + (cls || ''); }
+
+async function api(method, url, body){
+  const r = await fetch(url, {method, headers: body ? {'Content-Type': 'application/json'} : {}, body: body ? JSON.stringify(body) : undefined});
+  const j = await r.json().catch(() => ({error: `HTTP ${r.status}`}));
+  if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+  return j;
+}
+
+async function load(){
+  let d;
+  try { const r = await fetch('/api/fleet'); if (!r.ok) throw new Error(await r.text()); d = await r.json(); }
+  catch (e) { $('rows').innerHTML = `<tr><td colspan="11">${esc(e.message)}</td></tr>`; return; }
+  if (!filled) {                                   // choices for the selects, once
+    for (const sel of document.querySelectorAll('select[data-choices]'))
+      sel.innerHTML = d.choices[sel.dataset.choices].map(v => `<option value="${esc(v)}">${esc(v || '–')}</option>`).join('');
+    $('hmc').placeholder = `${d.hmc_default} (none = skip)`;
+    filled = true;
+  }
+  systems = d.systems;
+  running = d.check.running;
+  clockOff = d.now - Date.now() / 1000;
+  $('count').textContent = `${systems.length}` + (d.error ? ` — ${d.error}` : '');
+  $('check').disabled = !systems.length || running;
+  const c = d.check;
+  $('cst').textContent = running ? `checking ${c.names.length ? c.names.join(', ') : 'all'}… (results appear below when it finishes)` :
+    c.started ? `last check ${new Date(c.started * 1000).toLocaleTimeString()}` +
+      (/could not start|Traceback|fleet: /.test(c.output) ? ` — ${c.output.trim().split('\n').pop()}` : '') : '';
+  render();
+  renderActivity();
+}
+
+let lastHtml = '';
+const expanded = new Set();                       // rows whose full flag list is open
+function setRows(html){ if (html !== lastHtml) { $('rows').innerHTML = html; lastHtml = html; actHtml.clear(); } }   // no rebuild = no lost clicks
+function render(){
+  if (!systems.length) { setRows(`<tr><td colspan="11" class="mut">no systems yet: + Add system</td></tr>`); return; }
+  setRows(systems.map(s => {
+    const bmc = s.type === 'bmc' || s.profile === 'bmc-openbmc';
+    const kind = [s.type, s.profile !== 'linux' ? s.profile : '', s.access === 'console' ? 'console' : '',
+                  bmc && String(s.hmc).toLowerCase() !== 'none' ? `+HMC ${s.hmc || 'default'}` : ''].filter(Boolean).join(' · ');
+    const fl = s.flag_list || [];
+    return `<tr class="${editing === s.name ? 'sel' : ''}">
+    <td>${esc(s.name)}${s.server ? `<div class="mut">${esc(s.server)}</div>` : ''}</td>
+    <td>${esc(s.ip)}:${esc(s.port || 22)}</td><td class="mut">${esc(kind)}</td><td class="act" data-act="${esc(s.name)}"></td><td>${esc(s.user || 'root')}</td>
+    <td>${s.password ? 'set' : '<span class="mut">none</span>'}</td>
+    <td class="st ${esc(s.status).replace(/ /g, '-')}">${esc(s.status) || '<span class="mut">–</span>'}</td>
+    <td class="mut">${esc(s.last)}${s.seconds != null && s.last ? `<div>${s.seconds} s</div>` : ''}</td>
+    <td>${esc(s.problem)}</td>
+    <td>${s.summary ? `<div>${esc(s.summary)}</div>` : ''}${s.error ? `<div class="mut">${esc(s.error)}</div>` : ''}
+      ${fl.length ? `<ul class="flags">${(expanded.has(s.name) ? fl : fl.slice(0, 3)).map(f => `<li title="${esc(f)}">${esc(f.length > 140 && !expanded.has(s.name) ? f.slice(0, 140) + '…' : f)}</li>`).join('')}</ul>` +
+        (fl.length > 3 || fl.some(f => f.length > 140) ? `<button class="sm more" data-more="${esc(s.name)}">${expanded.has(s.name) ? 'show less' : `+${Math.max(0, fl.length - 3)} more`}</button>` : '') : ''}
+      ${s.cper ? `<div class="mut">CPER: ${esc(s.cper)}</div>` : ''}</td>
+    <td class="acts">
+      <button class="sm" data-edit="${esc(s.name)}">Edit</button>
+      <button class="sm" data-check="${esc(s.name)}" ${running ? 'disabled' : ''}>Check</button>
+      ${s.report ? `<button class="sm" data-rep="${esc(s.name)}">Report</button>` : ''}
+      <button class="sm danger" data-del="${esc(s.name)}">${armed === s.name ? 'Delete?' : '×'}</button></td></tr>`;
+  }).join(''));
+}
+// ---------- live activity: tiny pipeline per system, updated in place ----------
+const STAGE = {connect: 'connect', checks: 'checks', hmc: 'HMC', save: 'save', run: 'run', collect: 'collect'};
+const actHtml = new Map();
+let clockOff = 0, busy = false;
+const now = () => Date.now() / 1000 + clockOff;
+function ago(sec){ sec = Math.max(0, Math.round(sec));
+  return sec < 60 ? `${sec} s` : sec < 3600 ? `${Math.floor(sec / 60)} min` : `${Math.floor(sec / 3600)} h`; }
+
+function pipeHtml(p){
+  const st = p.stages || ['connect', 'checks', 'save'];
+  const cur = st.indexOf(p.stage), live = p.state === 'active', finished = !['active', 'queued'].includes(p.state);
+  const bad = ['error', 'stopped'].includes(p.state), warn = p.result === 'WARN';
+  const old = finished && p.finished && now() - p.finished > 600;            // older than 10 min: dimmed
+  let h = `<div class="pipe ${p.state === 'queued' ? 'queued' : ''} ${old ? 'old' : ''}">`;
+  st.forEach((name, k) => {
+    let c = '';
+    if (p.state === 'done') c = k === st.length - 1 && warn ? 'warn' : 'done';
+    else if (bad) c = k < cur ? 'done' : k === cur ? 'err' : '';
+    else if (live) c = k < cur ? 'done' : k === cur ? 'active' : '';
+    if (k) h += `<span class="ln ${c === 'done' || c === 'warn' || (c === 'err' && k <= cur) ? 'done' : c === 'active' ? 'flow' : ''}"></span>`;
+    h += `<span class="nd ${c}" title="${esc(STAGE[name] || name)}"></span>`;
+  });
+  h += '</div>';
+  if (live && p.stage === 'checks' && p.n) h += `<div class="bar"><i style="width:${Math.round(100 * (p.i || 0) / p.n)}%"></i></div>`;
+  let lab;
+  if (p.state === 'queued') lab = `<b>queued</b> · ${esc(p.step || '')}`;
+  else if (live) lab = `<span class="spin"></span><b>${esc(STAGE[p.stage] || p.stage || '')}</b>` +
+      (p.stage === 'checks' && p.n ? ` ${p.i || 0}/${p.n}` : '') + ` · ${esc(p.step || '')} · <span class="el" data-t0="${p.started || 0}"></span>`;
+  else {
+    const r = p.result || p.state, cls = r === 'OK' || r === 'exit 0' ? 'r-OK' : r === 'WARN' ? 'r-WARN' : 'r-bad';
+    lab = `<b class="${cls}">${esc(r)}</b> ${esc(p.kind || '')}` + (p.kind !== 'check' && p.step ? ` · ${esc(p.step)}` : '') +
+          ` · <span class="el" data-t0="${p.started || 0}" data-t1="${p.finished || 0}"></span>`;
+  }
+  return h + `<div class="lab" title="${esc(p.step || '')}">${lab}</div>`;
+}
+
+const probing = new Set();
+function hmcHtml(s){                               // BMC rows: is the HMC alive and answering Redfish
+  const bmc = s.type === 'bmc' || s.profile === 'bmc-openbmc';
+  if (!bmc || String(s.hmc).toLowerCase() === 'none') return '';
+  const h = s.hmc_status, ip = s.hmc || '172.31.13.251';
+  let led = '', txt;
+  if (probing.has(s.name)) { led = 'probing'; txt = 'probing via the BMC…'; }
+  else if (!h) txt = 'not checked yet';
+  else if (h.bmc && h.bmc !== 'OK') { led = 'bad'; txt = `unknown: BMC ${esc(h.bmc)}`; }
+  else {
+    led = h.redfish ? 'ok' : h.ping ? 'warn' : 'bad';
+    txt = `${h.ping ? 'alive' : h.ping === false ? 'no ping' : 'ping ?'} · Redfish ${h.redfish ? 'OK' : esc(h.http || 'no answer')}` +
+          (h.ms != null && !h.http && h.ms >= 9000 ? ' (timed out)' : h.ms != null ? ` · <span class="ms">${h.ms} ms</span>` : '') +
+          (h.error ? ` · ${esc(h.error)}` : '');
+  }
+  const when = h && !probing.has(s.name) ? ` · <span class="el" data-t1="${h.checked}" data-ago="1"></span>` : '';
+  const title = `HMC ${ip}: ping and GET /redfish/v1/ from the BMC` + (h ? ` (last by ${h.via})` : '');
+  return `<div class="hmc" title="${esc(title)}"><span class="led ${led}"></span><span class="tag">HMC</span><span>${txt}${when}</span>` +
+         `<button data-probe="${esc(s.name)}" title="probe now: one ping + one Redfish GET through the BMC" ${probing.has(s.name) ? 'disabled' : ''}>↻</button></div>`;
+}
+
+function renderActivity(){
+  let act = 0, q = 0, dn = 0, er = 0;
+  for (const s of systems) {
+    const p = s.progress, cell = document.querySelector(`td.act[data-act="${CSS.escape(s.name)}"]`);
+    if (p) { if (p.state === 'active') act++; else if (p.state === 'queued') q++; else if (p.state === 'done') dn++; else er++; }
+    if (!cell) continue;
+    const hm = hmcHtml(s);
+    const h = (p ? pipeHtml(p) : hm ? '' : '<span class="mut">–</span>') + hm;
+    if (actHtml.get(s.name) !== h) { cell.innerHTML = h; actHtml.set(s.name, h); }
+  }
+  busy = act + q > 0;
+  $('live').innerHTML = busy ? `<span class="spin"></span>${act} working · ${q} queued` + (dn + er ? ` · ${dn} done` + (er ? ` · ${er} failed` : '') : '') : '';
+  tick();
+}
+function tick(){                                   // elapsed / ago, every second, no re-render
+  for (const el of document.querySelectorAll('.el')) {
+    const t0 = +el.dataset.t0, t1 = +el.dataset.t1;
+    el.textContent = el.dataset.ago ? `${ago(now() - t1)} ago` :
+      !t0 ? '' : t1 ? `took ${ago(t1 - t0)}, ${ago(now() - t1)} ago` : ago(now() - t0);
+  }
+}
+setInterval(tick, 1000);
+
+$('rows').onclick = ev => {                        // one listener for all row buttons
+  const b = ev.target.closest('button'); if (!b || b.disabled) return;
+  const d = b.dataset;
+  if (d.more) { expanded.has(d.more) ? expanded.delete(d.more) : expanded.add(d.more); render(); renderActivity(); return; }
+  if (d.probe) { probe(d.probe); return; }
+  if (d.edit) openForm(d.edit); else if (d.rep) report(d.rep);
+  else if (d.check) runCheck([d.check]); else if (d.del) del(d.del);
+};
+
+function openForm(name){
+  const f = $('form'); f.reset();
+  editing = name || null;
+  const s = systems.find(x => x.name === name) || {};
+  for (const el of f.elements) if (el.name && el.type !== 'checkbox' && el.name !== 'password') el.value = s[el.name] ?? '';
+  if (!name) { f.access.value = 'ssh'; f.profile.value = 'linux'; }
+  $('pw').placeholder = name ? (s.password ? 'saved: type to replace' : 'none saved') : "empty = use the Pi's SSH key";
+  $('clearlbl').hidden = !(name && s.password);
+  $('ftitle').textContent = name ? `Edit ${name}` : 'Add system';
+  msg('fmsg', '');
+  $('formcard').hidden = false;
+  render();
+  $('formcard').scrollIntoView({behavior: 'smooth', block: 'nearest'});
+  f.elements.name.focus();
+}
+function closeForm(){ $('formcard').hidden = true; editing = null; $('form').reset(); render(); }
+
+$('form').onsubmit = async ev => {
+  ev.preventDefault();
+  const f = $('form'), system = {};
+  for (const el of f.elements) if (el.name && el.type !== 'checkbox' && el.name !== 'password') system[el.name] = el.value.trim();
+  const body = {old_name: editing, system, clear_password: f.elements.clear_password.checked};
+  if (f.elements.password.value) body.password = f.elements.password.value;
+  $('save').disabled = true;
+  try {
+    await api('POST', '/api/fleet/systems', body);
+    f.elements.password.value = '';
+    msg('msg', `${system.name} saved`, 'ok');
+    closeForm();
+    await load();
+  } catch (e) { msg('fmsg', e.message, 'bad'); }
+  $('save').disabled = false;
+};
+$('cancel').onclick = closeForm;
+$('add').onclick = () => openForm(null);
+
+async function del(name){
+  if (armed !== name) {                             // first click arms, second deletes (8 s)
+    armed = name; clearTimeout(armTimer); armTimer = setTimeout(() => { armed = null; render(); }, 8000); render(); return;
+  }
+  armed = null; clearTimeout(armTimer);
+  try { await api('DELETE', '/api/fleet/systems/' + encodeURIComponent(name)); msg('msg', `${name} deleted`, 'ok');
+        if (editing === name) closeForm(); }
+  catch (e) { msg('msg', e.message, 'bad'); }
+  load();
+}
+async function probe(name){
+  probing.add(name); renderActivity();
+  try { await api('POST', '/api/fleet/hmc-probe/' + encodeURIComponent(name)); }
+  catch (e) { msg('msg', `HMC probe ${name}: ${e.message}`, 'bad'); }
+  probing.delete(name); load();
+}
+async function runCheck(names){
+  $('check').disabled = true;
+  try { await api('POST', '/api/fleet/check', {names}); msg('msg', ''); busy = true; } catch (e) { msg('msg', e.message, 'bad'); }
+  load();
+}
+$('check').onclick = () => runCheck([]);
+
+async function report(name){
+  const r = await fetch('/api/fleet/report/' + encodeURIComponent(name));
+  $('reptitle').textContent = `Report: ${name}`;
+  $('rep').textContent = r.ok ? await r.text() : 'no report';
+  $('repcard').hidden = false;
+  $('repcard').scrollIntoView({behavior: 'smooth'});
+}
+(async function poll(){                            // 1 s while something runs, else 4 s
+  await load();
+  setTimeout(poll, busy || running ? 1000 : 4000);
+})();
+</script>
+</body>
+</html>

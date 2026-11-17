@@ -747,24 +747,105 @@ in as `m4013pi`. It is the tmux session `shared`, the same one
 anyone on it (or attached with `ssh -t m4013pi@<pi> tmux new -A -s shared`) can
 type into the same shell. Closing the page leaves the session running.
 
-- **Only through Cloudflare or the cable:** it is a full shell with sudo and the
-  tester has no login, so `/terminal` opens only through
-  `https://pi-tester.dona-anna.com` (after the Cloudflare email login) or over the
-  direct Ethernet link (`http://192.168.10.2/terminal`). From the Wi-Fi LAN or
-  the setup network it answers 403.
+- **Cloudflare, the cable or the Wi-Fi LAN:** it is a full shell with sudo and
+  the tester has no login, so `/terminal` opens only through
+  `https://pi-tester.dona-anna.com` (after the Cloudflare email login), over the
+  direct Ethernet link (`http://192.168.10.2/terminal`), or from the Wi-Fi network
+  the Pi has joined (`http://<wlan0 address>/terminal`). Anyone on that Wi-Fi
+  gets the shell, so keep the Pi on a trusted network. From the Wi-Fi setup
+  network it answers 403.
+- **More terminals:** **+ New terminal** opens another shell (tmux session
+  `t1`, `t2`, …, up to 8) in its own tab, separate from the shared one, so a long
+  job there does not get in Claude's way. Anyone can switch to any tab; 👁2 means
+  two pages are watching it. **×** then **Kill?** (two clicks) ends that terminal
+  and everything running in it. The **shared (Claude)** tab cannot be killed.
+  The open tab is kept in the address (`/terminal#t1`).
+- **Restarts are safe:** the tmux server runs in its own service,
+  `pi-tester-tmux`, so `systemctl restart pi-tester` keeps every terminal and
+  whatever runs in it (e.g. Claude Code). Only a reboot ends them.
 - **A− / A+** change the text size (kept per browser).
 - **Scrolling back:** mouse wheel, the **▲ / ▼** buttons (one page each, handy
   on a phone) or Shift+PgUp / Shift+PgDn. The yellow `[n/total]` tag at the top
   right means you are in scroll mode; scrolling back to the bottom, q or Esc
-  returns to the live screen. The session keeps 50 000 lines. Because tmux now
-  takes the mouse, hold **Shift** while dragging to select text for copying.
-  These settings are in `deploy/tmux.conf`, installed as `~m4013pi/.tmux.conf`.
+  returns to the live screen. The session keeps 50 000 lines.
+- **Copying:** drag over the text (or double-click a word); it goes to your PC's
+  clipboard and the header shows `copied N chars`. Paste with Ctrl+V anywhere.
+  tmux (or Claude Code) sends the selection to the page as an OSC 52 sequence and
+  the page writes it to the clipboard. Shift+drag selects in the page instead;
+  Ctrl+C then copies it (with nothing selected, Ctrl+C still interrupts).
+- These settings are in `deploy/tmux.conf`, installed as `~m4013pi/.tmux.conf`.
 - tmux keys work as usual: Ctrl+B then `[` also scrolls back, Ctrl+B then `d`
   detaches only this page.
 - Each open/close is logged with the Cloudflare user's email:
   `journalctl -u pi-tester | grep terminal:`.
 - xterm.js 5.5.0 (MIT) is served from the Pi (`web/vendor`), so the page works
   without internet on the cable.
+
+### 14. Fleet debug (https://pi-tester.dona-anna.com/fleet)
+
+Claude Code on the Pi checks and debugs a list of systems (servers, GPU trays,
+BMCs) over SSH. The list is entered on the page itself.
+
+1. On `/fleet` (the **Fleet** button), **+ Add system** opens a form: Name,
+   IP, Port, User, Password, and the optional fields below. **Edit** changes a
+   row (the password field stays empty: leave it to keep the saved one),
+   **×** then **Delete?** removes it. Changes are saved at once and show up for
+   everyone on the page within a few seconds.
+2. **Run health check on all**, or **Check** on one row: read-only checks;
+   Status, flags and CPER appear in the table, **Report** shows the full output.
+3. For the analysis open the **Terminal** (shared tab) and ask Claude, e.g.
+   `debug the systems in the fleet list`. It follows `~/fleet/CLAUDE.md`:
+   read-only, prefers reading the existing logs, asks before changing
+   anything, writes one conclusion per system into its Summary.
+4. **Download as Excel** exports the list with the results, without passwords.
+
+**Activity** column: what is happening on each system right now, updated every
+second while something runs. A row of dots shows the steps (connect → checks →
+HMC for BMC rows → save; connect → run for Claude's `fleet.py run/collect`):
+the current step pulses blue, finished steps turn green, a failed step red,
+an amber last dot means finished with warnings. Below it a progress bar for
+the checks (e.g. 9/14), the current command and a running timer; queued
+systems blink grey. The header shows "N working · N queued · N done". The
+state comes from `~/fleet/.progress/<name>.json`, written by `fleet.py`; work
+whose process died shows as "stopped".
+
+BMC rows also show an **HMC** indicator in the Activity column: is the HMC
+behind the BMC alive (ping from the BMC) and answering Redfish (`GET
+/redfish/v1/` from the BMC), with the HTTP code, response time and when it was
+last seen. Green with a heartbeat ring = alive and Redfish OK; amber = answers
+ping but Redfish does not (e.g. 503); red = no answer, or the BMC itself is
+unreachable (HMC state unknown). Every health check updates it; **↻** probes
+now (one SSH login to the BMC, one ping and one GET; `fleet.py hmc-probe NAME`).
+It is not polled on a timer.
+
+Fields that change the checks:
+
+| Column | Values | Effect |
+|---|---|---|
+| Access | `ssh` (default) / `console` | `console`: SSH lands on a serial-console shell (e.g. a GPU host behind its BMC). Commands are typed one at a time, slowly, and cut out between markers; minutes per system, never types credentials |
+| Profile | `linux` (default) / `gpu-vera` / `bmc-openbmc` | `gpu-vera` adds nvidia-smi, NVLink, driver versions, Xid/GSP/AER and hardware-error kernel logs, PCIe links, NIC, MCTP, boot clock; the full "Hardware Error" log goes to `raw/hwerr.txt` for CPER decoding. `bmc-openbmc` runs the linux set and the HMC survey |
+| Type, Server | `host`/`bmc`, e.g. `tray-07` | link the host and BMC rows of one tray |
+| HMC IP | empty = `172.31.13.251`, `none` = skip | BMC rows (Type `bmc` or Profile `bmc-openbmc`) also read the HMC behind the BMC, through the BMC (Redfish GET only): health, firmware, event logs, dumps, CPER (decoded with NVCPERTool on the Pi when installed), the HMC console; only events new since the previous check are flagged |
+| Timeout | seconds | per command; default 30 (ssh), 300 (console) |
+| Expected GPUs / PCIe / NVLink | `4`, `Gen6 x16`, `yes` | flag missing GPUs, downtrained links, inactive NVLinks |
+
+- **GPU tray example:** the BMC row with the BMC address, port 2200 (OpenBMC
+  shell on the tested tray), Type `bmc`; the host row with the same address,
+  port 22 (the host's serial console through the BMC), Access `console`,
+  Profile `gpu-vera`, Type `host`, the same Server label.
+- **Passwords:** the list stays on the Pi (`~m4013pi/fleet/systems.json`,
+  mode 600). The page opens through Cloudflare, the cable or the Wi-Fi LAN the
+  Pi has joined (never from the Wi-Fi setup network), the same rule as the terminal.
+  Passwords are never sent back to the browser, printed, exported or
+  written to reports. An older `systems.xlsx` is moved into the list once
+  (kept as `systems.xlsx.imported`).
+- **On the Pi:** `~/fleet/fleet.py list | check | run | collect | note | forget`
+  (`fleet.py -h`), reports in `~/fleet/reports/<name>/`. Host keys are
+  remembered on first contact (`~/fleet/known_hosts`); a changed key stops the
+  check until `fleet.py forget NAME`.
+- **Not in git:** NVIDIA tools and documents (NVCPERTool, NVOnline) and the
+  notes taken from them (`~/fleet/gpu-notes.md`) stay on the Pi only.
+  `tools/fleet/mkcper.py` rebuilds CPER records from the kernel log for decoding.
 
 ## Project layout
 
@@ -784,6 +865,7 @@ pi_tester/
   system_view.py  /system page data (/api/system)
   wifi_setup.py   Wi-Fi setup mode: setup network, captive page, DNS
   terminal.py     web terminal: shared tmux session over a WebSocket
+  fleet_web.py    /fleet page: workbook upload/download, health check, reports
   web_server.py   REST API, WebSocket consoles, UART streams (aiohttp)
   web/index.html  the control page (P4 page, renamed)
   web/camera.html full-page camera view
@@ -791,13 +873,16 @@ pi_tester/
   web/system.html live system diagram
   web/setup.html  Wi-Fi setup page (phone)
   web/terminal.html  web terminal page
+  web/fleet.html  fleet debug page
   web/vendor/     xterm.js + fit addon (MIT)
 deploy/
   install.sh      installer
   pi-tester.service
+  pi-tester-tmux.service  tmux server for the terminals (survives web restarts)
   tmux.conf       shared terminal session: mouse scrollback, 50 000 lines
 tools/
   pirun.sh        run a command in the shared terminal from the PC, print its output
+  fleet/          fleet debug: fleet.py (SSH checks), mkcper.py, CLAUDE.md for the Pi's Claude
 docs/API.md       HTTP API reference
 ```
 
@@ -854,5 +939,14 @@ docs/API.md       HTTP API reference
 | System page: live diagram, events, PSU readout, LM75, fits the window | ✅ |
 | Wi-Fi setup mode: setup network, DNS + portal redirect, wrong network falls back, saved network joined, service restart cleans up | ✅ incl. iPhone: join, page, save, rejoin in 12 s |
 | Setup button GPIO26: 3 s hold starts setup mode, short tap ignored, ACT LED blinks | ✅ real button |
-| Web terminal: shared tmux session, typing and output over the WebSocket, pirun.sh into the same session, Wi-Fi LAN refused (403) | ✅ also in a browser through Cloudflare |
+| Web terminal: shared tmux session, typing and output over the WebSocket, pirun.sh into the same session, opens from the Wi-Fi LAN, setup network refused (403) | ✅ also in a browser through Cloudflare |
 | Web terminal scrollback: mouse wheel, ▲/▼ buttons, back to the live screen at the bottom | ✅ through Cloudflare |
+| Web terminal copy: drag → PC clipboard (OSC 52) | ✅ through Cloudflare |
+| Extra terminals: create, list, kill (API); shared one refused; sessions survive `restart pi-tester` | ✅ API on the Pi and tabs (+, ×, Kill?) in a browser through Cloudflare |
+| Fleet: HMC indicator (alive / Redfish / unknown), ↻ probe, BMC-unreachable case on the real row | ✅ through Cloudflare; a live green result waits for the BMC to come back |
+| Fleet: live Activity per system (pipeline dots, progress bar, timer), checked with unreachable / wrong-password / simulated runs | ✅ through Cloudflare |
+| Fleet: form add / edit / rename / delete, validation, export without passwords, check button, AUTH FAILED / UNREACHABLE rows, no passwords in reports | ✅ through Cloudflare |
+| Fleet: health check on a real OpenBMC BMC over SSH (BusyBox tools) | ✅ |
+| Fleet: console mode (typed commands, markers, timeouts) | ✅ against a local pty shell; real GPU host console not yet |
+| Fleet: gpu-vera checks and flags | ✅ on synthetic output; real GPU host not yet (its disk failed) |
+| Fleet: HMC survey through the BMC (Redfish GET), NVCPERTool decode, new-event tracking | ✅ on data read from a real HMC; live run pending (BMC offline) |
